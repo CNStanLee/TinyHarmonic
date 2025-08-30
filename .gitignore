@@ -1,0 +1,18 @@
+# 忽略所有文件和文件夹
+*
+
+# 允许 Git 遍历文件夹
+!*/
+
+# 允许追踪 .py 和 .log 文件
+!*.py
+!*.ipynb
+!*.log
+!*.md
+!*.yaml
+# 例外：明确忽略某些特定 .log 文件
+**/vivado.log
+**/build_dataflow.log
+
+# 保留 .gitignore 自身
+!.gitignore
