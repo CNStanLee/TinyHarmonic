@@ -66,7 +66,7 @@ class TrainerQLSTMIDS:
             running_acc = 0.0
             running_val_acc = 0.0
             count = 0
-            count_val = 0  # 修复未定义变量
+            count_val = 0
             
             # 使用tqdm添加进度条
             train_pbar = tqdm(self.trainloader, desc=f'Epoch {j+1}/{self.num_epochs} [Train]')
@@ -74,12 +74,16 @@ class TrainerQLSTMIDS:
             epoch_time_start = time.time()
             
             for k, (inputs, labels) in enumerate(train_pbar):
-                inputs = inputs.reshape([self.train_batch_size, seq_len, input_length])
+                # 获取当前批次的实际大小
+                current_batch_size = inputs.size(0)
+                
+                # 使用动态形状而不是固定的批次大小
+                inputs = inputs.reshape([current_batch_size, seq_len, input_length])
                 inputs = inputs.to(self.device)
-                outputs = self.model(inputs, self.train_batch_size)
+                outputs = self.model(inputs, current_batch_size)
                 outputs = outputs.cpu()
-                labels = labels.reshape([self.train_batch_size, num_outputs])
-                outputs = outputs.reshape([self.train_batch_size, num_outputs])
+                labels = labels.reshape([current_batch_size, num_outputs])
+                outputs = outputs.reshape([current_batch_size, num_outputs])
                 
                 loss = self.criterion(outputs, labels)
                 self.optimizer.zero_grad()
@@ -107,12 +111,16 @@ class TrainerQLSTMIDS:
             
             with torch.no_grad():
                 for l, (val_inputs, val_labels) in enumerate(val_pbar):
-                    val_inputs = val_inputs.reshape([self.val_batch_size, seq_len, input_length])
+                    # 获取当前验证批次的实际大小
+                    current_val_batch_size = val_inputs.size(0)
+                    
+                    # 使用动态形状而不是固定的批次大小
+                    val_inputs = val_inputs.reshape([current_val_batch_size, seq_len, input_length])
                     val_inputs = val_inputs.to(self.device)
-                    val_outputs = self.model(val_inputs, self.val_batch_size)
+                    val_outputs = self.model(val_inputs, current_val_batch_size)
                     val_outputs = val_outputs.cpu()
-                    val_labels = val_labels.reshape([self.val_batch_size, num_outputs])
-                    val_outputs = val_outputs.reshape([self.val_batch_size, num_outputs])
+                    val_labels = val_labels.reshape([current_val_batch_size, num_outputs])
+                    val_outputs = val_outputs.reshape([current_val_batch_size, num_outputs])
                     
                     val_loss = self.criterion(val_outputs, val_labels)
                     val_acc = self.compute_accuracy(val_outputs, val_labels)
@@ -151,3 +159,43 @@ class TrainerQLSTMIDS:
             if not os.path.exists(self.model_folder):
                 os.makedirs(self.model_folder)
             torch.save(self.model.state_dict(), path)
+
+    def test(self, testloader):
+        self.model.eval()
+        running_test_loss = 0.0
+        running_test_acc = 0.0
+        count = 0
+        
+        # 使用tqdm添加进度条
+        test_pbar = tqdm(testloader, desc='Testing')
+        
+        with torch.no_grad():
+            for i, (test_inputs, test_labels) in enumerate(test_pbar):
+                # 获取当前测试批次的实际大小
+                current_batch_size = test_inputs.size(0)
+                
+                # 使用动态形状而不是固定的批次大小
+                test_inputs = test_inputs.reshape([current_batch_size, seq_len, input_length])
+                test_inputs = test_inputs.to(self.device)
+                test_outputs = self.model(test_inputs, current_batch_size)
+                test_outputs = test_outputs.cpu()
+                test_labels = test_labels.reshape([current_batch_size, num_outputs])
+                test_outputs = test_outputs.reshape([current_batch_size, num_outputs])
+
+                test_loss = self.criterion(test_outputs, test_labels)
+                test_acc = self.compute_accuracy(test_outputs, test_labels)
+
+                running_test_loss += test_loss.item()
+                running_test_acc += test_acc
+                count += 1
+                
+                # 更新测试进度条
+                test_pbar.set_postfix({
+                    'TestLoss': f'{test_loss.item():.4f}',
+                    'TestAcc': f'{test_acc:.4f}',
+                    'AvgTestLoss': f'{running_test_loss/count:.4f}',
+                    'AvgTestAcc': f'{running_test_acc/count:.4f}'
+                })
+
+        print(f'Test Summary:')
+        print(f'Loss: {running_test_loss/count:.4f}, Acc: {running_test_acc/count:.4f}')
