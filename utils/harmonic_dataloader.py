@@ -646,69 +646,69 @@ def create_data_loaders(config, batch_size=32, shuffle=True, train_ratio=0.7, va
     
     # 创建电压数据集
     voltage_train_dataset = HarmonicDataset(
-        voltage_train_val_inputs[train_indices], 
-        voltage_train_val_outputs[train_indices],
+        voltage_train_val_inputs[train_indices].astype(np.float32),  # 确保输入是 float32
+        voltage_train_val_outputs[train_indices].astype(np.float32),  # 确保输出是 float32
         voltage_train_val_ids[train_indices],
         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
         config.TARGET_SAMPLES_PER_CYCLE
     )
-    
+
     voltage_val_dataset = HarmonicDataset(
-        voltage_train_val_inputs[val_indices], 
-        voltage_train_val_outputs[val_indices],
+        voltage_train_val_inputs[val_indices].astype(np.float32),  # 确保输入是 float32
+        voltage_train_val_outputs[val_indices].astype(np.float32),  # 确保输出是 float32
         voltage_train_val_ids[val_indices],
         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
         config.TARGET_SAMPLES_PER_CYCLE
     )
-    
+
     # 创建电压仿真测试集
     voltage_test_sim_dataset = HarmonicDataset(
-        voltage_sim_inputs[sim_test_indices], 
-        voltage_sim_outputs[sim_test_indices],
+        voltage_sim_inputs[sim_test_indices].astype(np.float32),  # 确保输入是 float32
+        voltage_sim_outputs[sim_test_indices].astype(np.float32),  # 确保输出是 float32
         voltage_sim_ids[sim_test_indices],
         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
         config.TARGET_SAMPLES_PER_CYCLE
     )
-    
+
     # 创建电压真实测试集
     voltage_test_real_dataset = HarmonicDataset(
-        voltage_real_inputs[real_test_indices], 
-        voltage_real_outputs[real_test_indices],
+        voltage_real_inputs[real_test_indices].astype(np.float32),  # 确保输入是 float32
+        voltage_real_outputs[real_test_indices].astype(np.float32),  # 确保输出是 float32
         voltage_real_ids[real_test_indices],
         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
         config.TARGET_SAMPLES_PER_CYCLE
     )
-    
+
     # 创建电流数据集
     current_train_dataset = HarmonicDataset(
-        current_train_val_inputs[train_indices], 
-        current_train_val_outputs[train_indices],
+        current_train_val_inputs[train_indices].astype(np.float32),  # 确保输入是 float32
+        current_train_val_outputs[train_indices].astype(np.float32),  # 确保输出是 float32
         current_train_val_ids[train_indices],
         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
         config.TARGET_SAMPLES_PER_CYCLE
     )
-    
+
     current_val_dataset = HarmonicDataset(
-        current_train_val_inputs[val_indices], 
-        current_train_val_outputs[val_indices],
+        current_train_val_inputs[val_indices].astype(np.float32),  # 确保输入是 float32
+        current_train_val_outputs[val_indices].astype(np.float32),  # 确保输出是 float32
         current_train_val_ids[val_indices],
         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
         config.TARGET_SAMPLES_PER_CYCLE
     )
-    
+
     # 创建电流仿真测试集
     current_test_sim_dataset = HarmonicDataset(
-        current_sim_inputs[sim_test_indices], 
-        current_sim_outputs[sim_test_indices],
+        current_sim_inputs[sim_test_indices].astype(np.float32),  # 确保输入是 float32
+        current_sim_outputs[sim_test_indices].astype(np.float32),  # 确保输出是 float32
         current_sim_ids[sim_test_indices],
         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
         config.TARGET_SAMPLES_PER_CYCLE
     )
-    
+
     # 创建电流真实测试集
     current_test_real_dataset = HarmonicDataset(
-        current_real_inputs[real_test_indices], 
-        current_real_outputs[real_test_indices],
+        current_real_inputs[real_test_indices].astype(np.float32),  # 确保输入是 float32
+        current_real_outputs[real_test_indices].astype(np.float32),  # 确保输出是 float32
         current_real_ids[real_test_indices],
         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
         config.TARGET_SAMPLES_PER_CYCLE
@@ -829,7 +829,7 @@ def download_harmonic_data():
     # if the file does not exist, download it
     if not os.path.exists(output_path):
         gdown.download(url, output_path, quiet=False)
-        unzip_file(output_path, "./data/ids/")
+        unzip_file(output_path, "./data/real_data/")
     print("Harmonic dataset downloaded and unzipped.")
 
 def init_dataloaders(config, batch_size=32, shuffle=True, train_ratio=0.7, val_ratio=0.1, 

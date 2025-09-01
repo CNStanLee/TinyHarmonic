@@ -12,11 +12,13 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.fft import fft, fftfreq
-import pywt
+import pywt # pip install PyWavelets
 from scipy.signal import find_peaks, hilbert
 # ---------------------------------------------------------
 # from deps.qonnx.src.qonnx.util import config
 from utils.harmonic_dataloader import download_harmonic_data, Config, init_dataloaders, process_all_data, create_data_loaders, visualize_sample, init_dataloaders
+from models.qlstm_harmonic import QLSTMHarmonic
+from utils.trainer_qlstm_harmonic import TrainerQLSTMHarmonic
 # --------------------------------------------------------
 # Setting basic environment
 # --------------------------------------------------------
@@ -28,9 +30,10 @@ np.random.seed(1998)
 # --------------------------------------------------------
 # hyperparameters
 # --------------------------------------------------------
-batch_size = 128
-epochs = 2#
+
+epochs = 50#
 lr = 0.0001
+batch_size = 64
 
 def fft_harmonic_analysis(input_signal, target_samples_per_cycle, input_cycle_fraction):
     """
@@ -212,23 +215,8 @@ def main():
     #voltage_train_loader = data_loaders['voltage_train_loader']
     current_test_sim_loader = data_loaders['current_test_sim_loader']
     #calculate_harmonic_errors(current_test_sim_loader, input_cycle_fraction=input_cycle_fraction, target_samples_per_cycle=128)
-
-    #fft_harmonic_analysis(input_signal, target_samples_per_cycle, input_cycle_fraction)
-    # FFT方法
-    # fft_results = calculate_harmonic_errors(
-    #     current_test_sim_loader, 
-    #     input_cycle_fraction=input_cycle_fraction,
-    #     target_samples_per_cycle=64,
-    #     method='fft'
-    # )
-
-    # # 小波方法
-    # wavelet_results = calculate_harmonic_errors(
-    #     current_test_sim_loader, 
-    #     input_cycle_fraction=input_cycle_fraction,
-    #     target_samples_per_cycle=64,
-    #     method='wavelet'
-    # )
+    current_train_loader = data_loaders['current_train_loader']
+    current_val_loader = data_loaders['current_val_loader']
 
     # plot one signal
     signal, target, vehicle_id = next(iter(current_test_sim_loader))
@@ -237,127 +225,54 @@ def main():
     vehicle_id = vehicle_id[0].item()
     print("Vehicle ID:", vehicle_id)
     print("Target Harmonics:", target)
-
     print('Input Signal:', signal)
     print('input shape:', signal.shape)
 
-    # plot the signal
+    
+    # init the training env
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    # clean the plt figure before, dont show them
-    #plt.clf()
-    plt.figure(figsize=(12, 4))
-    plt.plot(signal, label='Input Signal')
-    plt.title(f'Sample Signal for Vehicle ID {vehicle_id}')
-    plt.xlabel('Sample Index')
-    plt.ylabel('Amplitude')
-    plt.legend()
-    plt.grid()
-    #plt.show()
-    # plot its fft
-    N = len(signal)
-    T = 1.0 / (3840 * input_cycle_fraction) 
-    yf = fft(signal)
-    xf = fftfreq(N, T)[:N//2]
-    amplitudes = 2.0/N * np.abs(yf[:N//2]) 
-    plt.figure(figsize=(12, 4))
-    plt.plot(xf, amplitudes)
-    plt.title(f'FFT of Signal for Vehicle ID {vehicle_id}')
-    plt.xlabel('Frequency (Hz)')
-    plt.ylabel('Amplitude')
-    plt.grid()
-    plt.xlim(0, 1000)  # 限制x轴范围以便更好地查看低频部分
-    #plt.show()
-    fs = 3840  # 采样频率 (Hz)
+    input_size = 64 * input_cycle_fraction
+    hidden_size = input_size // 2
+    num_layers = 2
 
-    # 使用DB4小波进行多尺度分解
-    # wavelet = 'db4'
-    # max_level = pywt.dwt_max_level(len(signal), pywt.Wavelet(wavelet).dec_len)
-    # coeffs = pywt.wavedec(signal, wavelet, level=max_level)
-
-    # # 计算各层的频率范围并估计幅值
-    # print(f"DB4小波分解（共{max_level}层）:")
-    # for i in range(1, max_level + 1):
-    #     # 计算当前层的频率范围
-    #     high_freq = fs / (2 ** i)
-    #     low_freq = fs / (2 ** (i + 1))
-        
-    #     # 估计当前层的幅值（使用细节系数的标准差）
-    #     detail_coeffs = coeffs[i]
-    #     amplitude_estimate = np.std(detail_coeffs) * np.sqrt(2)  # 标准差乘以sqrt(2)近似幅值
-        
-    #     print(f"第{i}层: {low_freq:.2f} - {high_freq:.2f} Hz, 估计幅值: {amplitude_estimate:.4f}")
-
-    # 可选：绘制小波分解的各层细节系数
-    # plt.figure(figsize=(12, 8))
-    # for i in range(1, max_level + 1):
-    #     plt.subplot(max_level, 1, i)
-    #     plt.plot(coeffs[i])
-    #     plt.title(f'Level {i} Detail Coefficients ({fs/(2**(i+1)):.2f}-{fs/(2**i):.2f} Hz)')
-    #     plt.grid()
-    # plt.tight_layout()
-    # plt.show()
-    # 计算采样频率
-    fs = 3840  # 采样频率 (Hz)
-    wavelet = 'db4'
-
-    # 假设 signal 是您的输入信号
-    # 创建小波包树
-    wp = pywt.WaveletPacket(data=signal, wavelet=wavelet, mode='symmetric', maxlevel=4)
-
-    # 获取所有节点路径
-    nodes = [node.path for node in wp.get_level(4, 'natural')]
-
-    print("小波包变换节点分析 (使用重建信号):")
-    for path in nodes:
-        node = wp[path]
-        # 重建该节点的信号子带
-        rec_signal = node.reconstruct()  # 重建信号，长度与原始信号相同
-        
-        # 计算频率范围
-        level = len(path)
-        band_width = fs / (2 ** level)
-        path_binary = path.replace('a', '0').replace('d', '1')
-        node_index = int(path_binary, 2)
-        low_freq = node_index * band_width
-        high_freq = (node_index + 1) * band_width
-        
-        # 估计幅值：使用重建信号的标准差乘以√2
-        amplitude_estimate = np.std(rec_signal) * np.sqrt(2)
-        
-        print(f"节点 {path}: {low_freq:.2f} - {high_freq:.2f} Hz, 估计幅值: {amplitude_estimate:.4f}")
-    # 绘制小波包系数
-    # plt.figure(figsize=(15, 10))
-    # for i, path in enumerate(nodes):
-    #     plt.subplot(len(nodes)//2 + 1, 2, i+1)
-    #     plt.plot(wp[path].data)
-        
-    #     # 计算频率范围用于标题
-    #     path_binary = path.replace('a', '0').replace('d', '1')
-    #     node_index = int(path_binary, 2)
-    #     band_width = fs / (2 ** len(path))
-    #     low_freq = node_index * band_width
-    #     high_freq = (node_index + 1) * band_width
-        
-    #     plt.title(f'Node {path} ({low_freq:.2f}-{high_freq:.2f} Hz)')
-    #     plt.grid(True)
-    # plt.tight_layout()
-    # plt.show()
-
-    # 可选：绘制小波包树的能量分布
-    # energy_map = {}
-    # for path in nodes:
-    #     energy_map[path] = np.sum(np.square(wp[path].data))
-
-    # plt.figure(figsize=(12, 6))
-    # plt.bar(range(len(energy_map)), list(energy_map.values()))
-    # plt.xticks(range(len(energy_map)), list(energy_map.keys()), rotation=45)
-    # plt.title('Energy Distribution Across Wavelet Packet Nodes')
-    # plt.ylabel('Energy')
-    # plt.grid(True, axis='y')
-    # plt.tight_layout()
-    # plt.show()
+    model = QLSTMHarmonic(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers).to(device)
+    #criterion = nn.MSELoss()  # 使用均方误差损失
 
 
 
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
+
+
+    model_folder = "./harmonic_models"
+
+    epsilon = 1e-8  # TMAPE 的小常数
+
+    # 设置训练参数
+    num_epochs = 100
+    #batch_size = 32
+    model_folder = "./harmonic_models"
+    epsilon = 1e-8  # TMAPE 的小常数
+
+    # 创建Trainer实例，使用TMAPE作为损失函数
+    trainer = TrainerQLSTMHarmonic(
+        model=model,
+        trainloader=current_train_loader,  # 使用电流训练数据
+        validationloader=current_val_loader,  # 使用电流验证数据
+        train_batch_size=batch_size,
+        val_batch_size=batch_size,
+        num_epochs=num_epochs,
+        optimizer=optimizer,
+        model_folder=model_folder,
+        device=device,
+        input_length=input_size,
+        epsilon=epsilon
+    )
+
+    # 开始训练
+    trainer.train()
+
+    # 测试模型
+    test_outputs, test_targets = trainer.test(current_test_sim_loader)  
 if __name__ == "__main__":
     main()

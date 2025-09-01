@@ -17,46 +17,6 @@ lstm_activation_bit_width = 6
 linear_activation_bit_width = 6
 
 
-class QLSTMIDS(nn.Module):
-    def __init__(self):
-        super(QLSTMIDS, self).__init__()
-        # To be uncommented while training an LSTM model.
-        self.qlstm = bnn.QuantLSTM(input_size=10, hidden_size=20,num_layers=1,batch_first=True,
-            weight_bit_width=lstm_weight_bit_width,
-            io_quant=Int8ActPerTensorFloat,
-            gate_acc_bit_width=lstm_activation_bit_width,
-            sigmoid_bit_width=lstm_activation_bit_width,
-            tanh_bit_width=lstm_activation_bit_width,
-            cell_state_bit_width=lstm_activation_bit_width,
-            bias_quant=None)#Setting batch_first to "True" changed everything, Need to investigate why it worked.
-        self.qfc1 = bnn.QuantLinear(20, 64,bias=True, weight_bit_width=linear_weight_bit_width)
-        self.qfc2 = bnn.QuantLinear(64, 32,bias=True, weight_bit_width=linear_weight_bit_width)
-        self.qfc3 = bnn.QuantLinear(32, 5,bias=True, weight_bit_width=linear_weight_bit_width)
-        self.relu = nn.ReLU()
-        self.qrelu = bnn.QuantReLU(bit_width=linear_activation_bit_width)
-        self.dropout = nn.Dropout(0.2)
-        self.bn1 = nn.BatchNorm1d(20)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.bn3 = nn.BatchNorm1d(32)
-        self.sigmoid = nn.Sigmoid()
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, x,batch_size):
-        # Initialize hidden state with zeros
-        h0 = torch.zeros(1,batch_size, 20).requires_grad_().to("cuda:0")
-        # Initialize cell state
-        c0 = torch.zeros(1,batch_size, 20).requires_grad_().to("cuda:0")    
-        #Start model definition
-        out,(hn,cn) = self.qlstm(x,(h0.detach(),c0.detach())) 
-        out = hn[-1, :, :]
-        out = self.qrelu(out)
-        out = self.qfc1(out)
-        out = self.qrelu(out)
-        out = self.qfc2(out)
-        out = self.qrelu(out)
-        out = self.qfc3(out)
-        return out
-    
 class QLSTMHarmonic(nn.Module):
     def __init__(self, input_size=64, hidden_size=20, num_layers=1):
         super(QLSTMHarmonic, self).__init__()
@@ -87,23 +47,17 @@ class QLSTMHarmonic(nn.Module):
         # 激活函数和正则化
         self.relu = nn.ReLU()
         self.qrelu = bnn.QuantReLU(bit_width=linear_activation_bit_width)
-        self.dropout = nn.Dropout(0.2)
-        self.bn1 = nn.BatchNorm1d(hidden_size)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.bn3 = nn.BatchNorm1d(32)
 
     def forward(self, x):
+        # 确保输入数据类型正确
+        x = x.float()  # 转换为float32
+        
         # x形状: (batch_size, input_size) -> 需要重塑为 (batch_size, seq_len, features)
         x = x.view(-1, self.input_size, 1)  # 转换为(batch_size, seq_len, 1)
         
-        batch_size = x.size(0)
-        
-        # 初始化隐藏状态
-        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).requires_grad_().to(x.device)
-        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).requires_grad_().to(x.device)
-        
-        # LSTM前向传播
-        out, (hn, cn) = self.qlstm(x, (h0.detach(), c0.detach()))
+        # 让 QuantLSTM 处理隐藏状态初始化
+        # 传递 None 作为隐藏状态，让 QuantLSTM 使用默认初始化
+        out, _ = self.qlstm(x, None)
         
         # 取最后一个时间步的输出
         out = out[:, -1, :]  # 形状: (batch_size, hidden_size)
