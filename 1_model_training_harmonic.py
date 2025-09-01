@@ -16,8 +16,8 @@ import pywt # pip install PyWavelets
 from scipy.signal import find_peaks, hilbert
 # ---------------------------------------------------------
 # from deps.qonnx.src.qonnx.util import config
-from utils.harmonic_dataloader import download_harmonic_data, Config, init_dataloaders, process_all_data, create_data_loaders, visualize_sample, init_dataloaders
-from models.qlstm_harmonic import QLSTMHarmonic
+from utils.harmonic_dataloader import download_harmonic_data, Config, init_dataloaders, process_all_data, visualize_sample, init_dataloaders
+from models.qlstm_harmonic import QLSTMHarmonic, HarmonicEstimationLSTM
 from utils.trainer_qlstm_harmonic import TrainerQLSTMHarmonic
 # --------------------------------------------------------
 # Setting basic environment
@@ -32,7 +32,7 @@ np.random.seed(1998)
 # --------------------------------------------------------
 
 epochs = 50#
-lr = 0.0001
+lr = 0.001
 batch_size = 64
 
 def fft_harmonic_analysis(input_signal, target_samples_per_cycle, input_cycle_fraction):
@@ -203,7 +203,7 @@ def main():
     if not (config.TEMP_DATA_DIR / 'voltage_data.csv').exists():
         process_all_data(config, include_simulation=True)
 
-    input_cycle_fraction = 1
+    input_cycle_fraction = 0.25
     data_loaders = init_dataloaders(config,
                       batch_size=batch_size,
                         shuffle=True,
@@ -232,16 +232,20 @@ def main():
     # init the training env
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    input_size = 64 * input_cycle_fraction
-    hidden_size = input_size // 2
-    num_layers = 2
+    input_size = (64 * input_cycle_fraction)
+    # convert to integer
+    input_size = int(input_size)
+    hidden_size = 64
+    num_layers = 1
 
-    model = QLSTMHarmonic(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers).to(device)
+    #model = QLSTMHarmonic(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers).to(device)
     #criterion = nn.MSELoss()  # 使用均方误差损失
+    model_float= HarmonicEstimationLSTM(input_size=input_size
+                                    , hidden_size=hidden_size,
+                                      num_layers=num_layers).to(device)
 
 
-
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
+    #optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
 
 
     model_folder = "./harmonic_models"
@@ -249,30 +253,52 @@ def main():
     epsilon = 1e-8  # TMAPE 的小常数
 
     # 设置训练参数
-    num_epochs = 100
+    num_epochs = 2000
     #batch_size = 32
     model_folder = "./harmonic_models"
     epsilon = 1e-8  # TMAPE 的小常数
 
-    # 创建Trainer实例，使用TMAPE作为损失函数
+
+    # 创建模型和优化器
+    model = model_float
+    train_loader = current_train_loader
+    val_loader = current_val_loader
+    test_loader = current_test_sim_loader
+
+
+
+
+
+
+    optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+
+    # 创建学习率调度器
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, verbose=True
+    )
+
+    # 创建训练器
     trainer = TrainerQLSTMHarmonic(
         model=model,
-        trainloader=current_train_loader,  # 使用电流训练数据
-        validationloader=current_val_loader,  # 使用电流验证数据
-        train_batch_size=batch_size,
-        val_batch_size=batch_size,
-        num_epochs=num_epochs,
+        trainloader=train_loader,
+        validationloader=val_loader,
+        train_batch_size=32,
+        val_batch_size=32,
+        num_epochs=100,
         optimizer=optimizer,
-        model_folder=model_folder,
+        model_folder="./models",
         device=device,
-        input_length=input_size,
-        epsilon=epsilon
+        loss_type="combined",  # 使用组合损失
+        lr_scheduler=scheduler,  # 使用学习率调度器
+        grad_clip=1.0,  # 梯度裁剪
+        early_stopping_patience=200  # 早停耐心值
     )
 
     # 开始训练
     trainer.train()
 
-    # 测试模型
-    test_outputs, test_targets = trainer.test(current_test_sim_loader)  
+    # 测试
+    test_outputs, test_targets = trainer.test(test_loader)
+
 if __name__ == "__main__":
     main()

@@ -17,16 +17,15 @@ warnings.filterwarnings('ignore')
 
 # 配置参数
 class Config:
-    # 数据路径
+
     DATA_ROOT = Path('data/real_data/EV-CPW Dataset')
     
-    # 采样参数
     ORIGINAL_SAMPLES_PER_CYCLE = 512
-    TARGET_SAMPLING_RATE = 3840  # Hz
-    SYSTEM_FREQUENCY = 60  # Hz (从数据推断)
+    TARGET_SAMPLING_RATE = 3840  
+    SYSTEM_FREQUENCY = 60 
     TARGET_SAMPLES_PER_CYCLE = TARGET_SAMPLING_RATE // SYSTEM_FREQUENCY  # 64
     
-    # 数据处理参数
+
     INPUT_CYCLE_FRACTION = 0.5  # 1/2个周期作为输入
     OUTPUT_HARMONICS = [1, 3, 5, 7]  # 输出谐波次数
     EXTENSION_CYCLES = 8  # 复制延拓的周期数
@@ -397,151 +396,119 @@ def process_all_data(config, include_simulation=True):
     return voltage_inputs, voltage_outputs, current_inputs, current_outputs, vehicle_ids
 
 # 数据加载器
+import numpy as np
+
 class HarmonicDataset:
-    def __init__(self, inputs, outputs, vehicle_ids=None, input_cycle_fraction=0.5, target_samples_per_cycle=64):
-        self.full_inputs = inputs  # 存储完整的4个周期数据
-        self.outputs = outputs
+    def __init__(self, inputs, outputs, vehicle_ids=None, 
+                 input_cycle_fraction=0.5, target_samples_per_cycle=64):
+        self.full_inputs = inputs.astype(np.float32)
+        self.outputs = outputs.astype(np.float32)
         self.vehicle_ids = vehicle_ids
         self.n_samples = inputs.shape[0]
         self.input_cycle_fraction = input_cycle_fraction
         self.target_samples_per_cycle = target_samples_per_cycle
         self.update_input_length()
-    
+        
+        # 归一化参数
+        self.normalized = False
+        self.scale = 400.0  # 固定映射范围 [-400, 400]
+        
+        # 数据增强相关（初始化时不启用）
+        self.augment = False
+        self.augment_config = {
+            "noise_std": 0.01,       # 高斯噪声标准差
+            "time_jitter": 2,        # 时间抖动最大偏移点数
+            "scaling_range": (0.9,1.1) # 振幅缩放
+        }
+
     def update_input_length(self, input_cycle_fraction=None):
         """更新输入长度"""
         if input_cycle_fraction is not None:
             self.input_cycle_fraction = input_cycle_fraction
-        
-        # 计算输入长度（绝对值）
         self.input_length = int(self.target_samples_per_cycle * abs(self.input_cycle_fraction))
     
     def set_input_cycle_fraction(self, input_cycle_fraction):
         """设置输入周期比例"""
         self.update_input_length(input_cycle_fraction)
     
+    def normalize(self):
+        """将 full_inputs 和 outputs 从 [-400,400] 归一化到 [-1,1]"""
+        self.full_inputs = self.full_inputs / self.scale
+        self.outputs = self.outputs / self.scale
+        self.normalized = True
+        print("Dataset normalized: mapped from [-400, 400] to [-1, 1].")
+    
+    def denormalize_outputs(self, y_norm):
+        """将归一化后的输出反归一化回 [-400, 400]"""
+        if not self.normalized:
+            raise ValueError("Dataset has not been normalized yet.")
+        return y_norm * self.scale
+    
+    def enable_augmentation(self, config=None):
+        """开启数据增强"""
+        self.augment = True
+        if config:
+            self.augment_config.update(config)
+        print("Data augmentation enabled with config:", self.augment_config)
+
+    def disable_augmentation(self):
+        """关闭数据增强"""
+        self.augment = False
+        print("Data augmentation disabled.")
+    
     def __len__(self):
         return self.n_samples
     
     def __getitem__(self, idx):
-        # 从完整的4个周期数据中提取指定长度的输入
-        # 这里可以根据需要选择不同的部分
-        
         # 计算起始索引
         if self.input_cycle_fraction >= 0:
-            # 正数表示从当前周期开始
-            start_idx = self.target_samples_per_cycle  # 当前周期的起始索引
+            start_idx = self.target_samples_per_cycle
             start_idx += int(self.target_samples_per_cycle * (1 - self.input_cycle_fraction))
         else:
-            # 负数表示从上一个周期开始
             start_idx = int(self.target_samples_per_cycle * (1 + self.input_cycle_fraction))
         
-        # 确保索引在有效范围内
+        # 限制范围
         start_idx = max(0, min(start_idx, self.full_inputs.shape[1] - self.input_length))
         end_idx = start_idx + self.input_length
         
-        input_data = self.full_inputs[idx, start_idx:end_idx]
+        input_data = self.full_inputs[idx, start_idx:end_idx].copy()
+        target_data = self.outputs[idx]
+        
+        # ==== 数据增强（仅当启用时） ====
+        if self.augment:
+            input_data = self.apply_augmentation(input_data)
         
         if self.vehicle_ids is not None:
-            return input_data, self.outputs[idx], self.vehicle_ids[idx]
-        return input_data, self.outputs[idx]
+            return input_data, target_data, self.vehicle_ids[idx]
+        return input_data, target_data
+    
+    def apply_augmentation(self, data):
+        """对单个样本应用增强"""
+        cfg = self.augment_config
 
-# 创建数据加载器
-# def create_data_loaders(config, batch_size=32, shuffle=True, train_ratio=0.8, input_cycle_fraction=None):
-#     """
-#     从CSV文件创建数据加载器
-#     """
-#     # 从CSV文件加载数据
-#     voltage_df = pd.read_csv(config.TEMP_DATA_DIR / 'voltage_data.csv')
-#     current_df = pd.read_csv(config.TEMP_DATA_DIR / 'current_data.csv')
-    
-#     # 提取输入和输出数据
-#     voltage_input_cols = [col for col in voltage_df.columns if col.startswith('voltage_input_')]
-#     voltage_output_cols = [col for col in voltage_df.columns if col.startswith('voltage_harmonic_')]
-    
-#     current_input_cols = [col for col in current_df.columns if col.startswith('current_input_')]
-#     current_output_cols = [col for col in current_df.columns if col.startswith('current_harmonic_')]
-    
-#     voltage_inputs = voltage_df[voltage_input_cols].values
-#     voltage_outputs = voltage_df[voltage_output_cols].values
-#     voltage_vehicle_ids = voltage_df['vehicle_id'].values
-    
-#     current_inputs = current_df[current_input_cols].values
-#     current_outputs = current_df[current_output_cols].values
-#     current_vehicle_ids = current_df['vehicle_id'].values
-    
-#     # 创建电压和电流数据集
-#     voltage_dataset = HarmonicDataset(
-#         voltage_inputs, 
-#         voltage_outputs, 
-#         voltage_vehicle_ids,
-#         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
-#         config.TARGET_SAMPLES_PER_CYCLE
-#     )
-    
-#     current_dataset = HarmonicDataset(
-#         current_inputs, 
-#         current_outputs, 
-#         current_vehicle_ids,
-#         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
-#         config.TARGET_SAMPLES_PER_CYCLE
-#     )
-    
-#     # 分割训练集和测试集
-#     n_total = voltage_inputs.shape[0]
-#     n_train = int(n_total * train_ratio)
-#     indices = np.random.permutation(n_total)
-    
-#     train_indices = indices[:n_train]
-#     test_indices = indices[n_train:]
-    
-#     # 创建电压数据加载器
-#     voltage_train_dataset = HarmonicDataset(
-#         voltage_inputs[train_indices], 
-#         voltage_outputs[train_indices],
-#         voltage_vehicle_ids[train_indices] if voltage_vehicle_ids is not None else None,
-#         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
-#         config.TARGET_SAMPLES_PER_CYCLE
-#     )
-    
-#     voltage_test_dataset = HarmonicDataset(
-#         voltage_inputs[test_indices], 
-#         voltage_outputs[test_indices],
-#         voltage_vehicle_ids[test_indices] if voltage_vehicle_ids is not None else None,
-#         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
-#         config.TARGET_SAMPLES_PER_CYCLE
-#     )
-    
-#     # 创建电流数据加载器
-#     current_train_dataset = HarmonicDataset(
-#         current_inputs[train_indices], 
-#         current_outputs[train_indices],
-#         current_vehicle_ids[train_indices] if current_vehicle_ids is not None else None,
-#         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
-#         config.TARGET_SAMPLES_PER_CYCLE
-#     )
-    
-#     current_test_dataset = HarmonicDataset(
-#         current_inputs[test_indices], 
-#         current_outputs[test_indices],
-#         current_vehicle_ids[test_indices] if current_vehicle_ids is not None else None,
-#         input_cycle_fraction or config.INPUT_CYCLE_FRACTION,
-#         config.TARGET_SAMPLES_PER_CYCLE
-#     )
-    
-#     return {
-#         'voltage': {
-#             'train': voltage_train_dataset,
-#             'test': voltage_test_dataset
-#         },
-#         'current': {
-#             'train': current_train_dataset,
-#             'test': current_test_dataset
-#         }
-#     }
-def create_data_loaders(config, batch_size=32, shuffle=True, train_ratio=0.7, val_ratio=0.1, 
+        # 1. 高斯噪声
+        if cfg.get("noise_std", 0) > 0:
+            noise = np.random.normal(0, cfg["noise_std"], size=data.shape).astype(np.float32)
+            data = data + noise
+
+        # 2. 时间抖动（相当于随机平移序列）
+        max_jitter = cfg.get("time_jitter", 0)
+        if max_jitter > 0:
+            shift = np.random.randint(-max_jitter, max_jitter + 1)
+            data = np.roll(data, shift)
+
+        # 3. 振幅缩放
+        scale_min, scale_max = cfg.get("scaling_range", (1.0, 1.0))
+        if scale_min != 1.0 or scale_max != 1.0:
+            scale = np.random.uniform(scale_min, scale_max)
+            data = data * scale
+
+        return data.astype(np.float32)
+
+def create_datasets(config, shuffle=True, train_ratio=0.7, val_ratio=0.1, 
                         sim_test_ratio=0.2, input_cycle_fraction=None):
     """
-    从CSV文件创建数据加载器，确保没有数据泄漏
+    从CSV文件创建数据集，确保没有数据泄漏
     训练集和验证集来自真实数据和部分仿真数据
     测试集分为仿真数据测试集和真实数据测试集
     """
@@ -775,20 +742,20 @@ if __name__ == "__main__":
     # 处理所有数据（只需要运行一次）
     if not (config.TEMP_DATA_DIR / 'voltage_data.csv').exists():
         process_all_data(config, include_simulation=True)
-    
-    # 创建数据加载器，可以指定输入周期比例
-    loaders = create_data_loaders(config, batch_size=32, input_cycle_fraction=0.5)
+
+    # 创建数据集，可以指定输入周期比例
+    datasets = create_datasets(config, input_cycle_fraction=0.5)
     
     # 示例：获取一批电压数据
-    voltage_train_loader = loaders['voltage']['train']
-    sample_input, sample_output, vehicle_id = voltage_train_loader[0]
-    
+    voltage_train_dataset = datasets['voltage']['train']
+    sample_input, sample_output, vehicle_id = voltage_train_dataset[0]
+
     print(f"输入形状: {sample_input.shape}")
     print(f"输出形状: {sample_output.shape}")
     print(f"车型ID: {vehicle_id}")
     
     # 示例：获取一批电流数据
-    current_train_loader = loaders['current']['train']
+    current_train_loader = datasets['current']['train']
     sample_input, sample_output, vehicle_id = current_train_loader[0]
     
     print(f"输入形状: {sample_input.shape}")
@@ -796,8 +763,8 @@ if __name__ == "__main__":
     print(f"车型ID: {vehicle_id}")
     
     # 可视化一个样本
-    visualize_sample(loaders, sample_idx=0, signal_type='current', config=config)
-    visualize_sample(loaders, sample_idx=0, signal_type='voltage', config=config)
+    visualize_sample(datasets, sample_idx=0, signal_type='current', config=config)
+    visualize_sample(datasets, sample_idx=0, signal_type='voltage', config=config)
     
     # 示例：更改输入周期比例
     print("\n更改输入周期比例为-0.5（使用上一个周期的后半部分）")
@@ -834,60 +801,74 @@ def download_harmonic_data():
 
 def init_dataloaders(config, batch_size=32, shuffle=True, train_ratio=0.7, val_ratio=0.1, 
                         sim_test_ratio=0.2, input_cycle_fraction=3, show_figs=False):
-    loaders = create_data_loaders(config, 
-                                  batch_size=batch_size, 
+    datasets = create_datasets(config, 
                                   shuffle=shuffle, 
                                   train_ratio=train_ratio, 
                                   val_ratio=val_ratio, 
                                   sim_test_ratio=sim_test_ratio,
                                   input_cycle_fraction=input_cycle_fraction)
 
-    voltage_train_loader = loaders['voltage']['train']
-    voltage_val_loader = loaders['voltage']['val']
-    voltage_test_sim_loader = loaders['voltage']['test_sim']
-    voltage_test_real_loader = loaders['voltage']['test_real']
-    current_train_loader = loaders['current']['train']
-    current_val_loader = loaders['current']['val']
-    current_test_sim_loader = loaders['current']['test_sim']
-    current_test_real_loader = loaders['current']['test_real']
+    voltage_train_dataset = datasets['voltage']['train']
+    voltage_val_dataset = datasets['voltage']['val']
+    voltage_test_sim_dataset = datasets['voltage']['test_sim']
+    voltage_test_real_dataset = datasets['voltage']['test_real']
+    current_train_dataset = datasets['current']['train']
+    current_val_dataset = datasets['current']['val']
+    current_test_sim_dataset = datasets['current']['test_sim']
+    current_test_real_dataset = datasets['current']['test_real']
 
     print("voltage dataset info:")
-    print(f"training set size: {len(voltage_train_loader)}")
-    print(f"validation set size: {len(voltage_val_loader)}")
-    print(f"test set (simulation) size: {len(voltage_test_sim_loader)}")
-    print(f"test set (real) size: {len(voltage_test_real_loader)}")
-    print(f"input cycle fraction: {voltage_train_loader.input_cycle_fraction}")
+    print(f"training set size: {len(voltage_train_dataset)}")
+    print(f"validation set size: {len(voltage_val_dataset)}")
+    print(f"test set (simulation) size: {len(voltage_test_sim_dataset)}")
+    print(f"test set (real) size: {len(voltage_test_real_dataset)}")
+    print(f"input cycle fraction: {voltage_train_dataset.input_cycle_fraction}")
 
     print("\ncurrent dataset info:")
-    print(f"training set size: {len(current_train_loader)}")
-    print(f"validation set size: {len(current_val_loader)}")
-    print(f"test set (simulation) size: {len(current_test_sim_loader)}")
-    print(f"test set (real) size: {len(current_test_real_loader)}")
-    print(f"input cycle fraction: {current_train_loader.input_cycle_fraction}")
+    print(f"training set size: {len(current_train_dataset)}")
+    print(f"validation set size: {len(current_val_dataset)}")
+    print(f"test set (simulation) size: {len(current_test_sim_dataset)}")
+    print(f"test set (real) size: {len(current_test_real_dataset)}")
+    print(f"input cycle fraction: {current_train_dataset.input_cycle_fraction}")
 
-    sample_input, sample_output, vehicle_id = current_train_loader[15]
+    sample_input, sample_output, vehicle_id = current_train_dataset[15]
     visualize_sample(sample_input, sample_output, vehicle_id, signal_type='current', config=config, name=f'train_{input_cycle_fraction}', show_fig=show_figs)
-    sample_input, sample_output, vehicle_id = current_val_loader[15]
+    sample_input, sample_output, vehicle_id = current_val_dataset[15]
     visualize_sample(sample_input, sample_output, vehicle_id, signal_type='current', config=config, name=f'val_{input_cycle_fraction}', show_fig=show_figs)
-    sample_input, sample_output, vehicle_id = current_test_sim_loader[15]
+    sample_input, sample_output, vehicle_id = current_test_sim_dataset[15]
     visualize_sample(sample_input, sample_output, vehicle_id, signal_type='current', config=config, name=f'test_sim_{input_cycle_fraction}', show_fig=show_figs)
-    sample_input, sample_output, vehicle_id = current_test_real_loader[15]
+    sample_input, sample_output, vehicle_id = current_test_real_dataset[15]
     visualize_sample(sample_input, sample_output, vehicle_id, signal_type='current', config=config, name=f'test_real_{input_cycle_fraction}', show_fig=show_figs)
     # print data shape
     print(f"current sample input shape: {sample_input.shape}")
     print(f"current sample output shape: {sample_output.shape}")
 
-    # return voltage_train_loader, voltage_val_loader, voltage_test_sim_loader, voltage_test_real_loader, \
-    #        current_train_loader, current_val_loader, current_test_sim_loader, current_test_real_loader
-    # convert to loaders with batch size
-    voltage_train_loader = DataLoader(voltage_train_loader, batch_size=batch_size, shuffle=shuffle)
-    voltage_val_loader = DataLoader(voltage_val_loader, batch_size=batch_size, shuffle=shuffle)
-    voltage_test_sim_loader = DataLoader(voltage_test_sim_loader, batch_size=batch_size, shuffle=shuffle)
-    voltage_test_real_loader = DataLoader(voltage_test_real_loader, batch_size=batch_size, shuffle=shuffle)
-    current_train_loader = DataLoader(current_train_loader, batch_size=batch_size, shuffle=shuffle)
-    current_val_loader = DataLoader(current_val_loader, batch_size=batch_size, shuffle=shuffle)
-    current_test_sim_loader = DataLoader(current_test_sim_loader, batch_size=batch_size, shuffle=shuffle)
-    current_test_real_loader = DataLoader(current_test_real_loader, batch_size=batch_size, shuffle=shuffle)
+    voltage_test_real_dataset.normalize()
+    current_test_real_dataset.normalize()
+    voltage_train_dataset.normalize()
+    current_train_dataset.normalize()
+    voltage_val_dataset.normalize()
+    current_val_dataset.normalize()
+    voltage_test_sim_dataset.normalize()
+    current_test_sim_dataset.normalize()    
+
+
+    # voltage_train_dataset.enable_augmentation({"noise_std":0.02, "time_jitter":3})
+    # current_train_dataset.enable_augmentation({"noise_std":0.02, "time_jitter":3})
+    # voltage_val_dataset.enable_augmentation({"noise_std":0.02, "time_jitter":3})
+    # current_val_dataset.enable_augmentation({"noise_std":0.02, "time_jitter":3})
+
+    voltage_train_loader = DataLoader(voltage_train_dataset, batch_size=batch_size, shuffle=shuffle)
+    voltage_val_loader = DataLoader(voltage_val_dataset, batch_size=batch_size, shuffle=shuffle)
+    voltage_test_sim_loader = DataLoader(voltage_test_sim_dataset, batch_size=batch_size, shuffle=shuffle)
+    voltage_test_real_loader = DataLoader(voltage_test_real_dataset, batch_size=batch_size, shuffle=shuffle)
+    current_train_loader = DataLoader(current_train_dataset, batch_size=batch_size, shuffle=shuffle)
+    current_val_loader = DataLoader(current_val_dataset, batch_size=batch_size, shuffle=shuffle)
+    current_test_sim_loader = DataLoader(current_test_sim_dataset, batch_size=batch_size, shuffle=shuffle)
+    current_test_real_loader = DataLoader(current_test_real_dataset, batch_size=batch_size, shuffle=shuffle)
+
+    
+
 
     return {
         'voltage_train_loader': voltage_train_loader,

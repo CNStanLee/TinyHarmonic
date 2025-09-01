@@ -9,7 +9,83 @@ from brevitas.quant import Int8ActPerTensorFloat,Uint8ActPerTensorFloat
 import itertools
 import time
 import os
+import torch
+import torch.nn as nn
 
+class HarmonicEstimationLSTM(nn.Module):
+    def __init__(self, input_size=64, hidden_size=128, num_layers=2, dropout=0.2):
+        """
+        LSTM谐波估计模型
+        
+        参数:
+            input_size: 输入特征维度 (默认为64)
+            hidden_size: LSTM隐藏层维度 (默认为128)
+            num_layers: LSTM层数 (默认为2)
+            dropout: Dropout概率 (默认为0.2)
+        """
+        super(HarmonicEstimationLSTM, self).__init__()
+        
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        # LSTM层
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0
+        )
+        
+        # Dropout层
+        self.dropout = nn.Dropout(dropout)
+        
+        # 全连接输出层
+        self.fc = nn.Linear(hidden_size, 4)
+        
+        # 初始化权重
+        self.init_weights()
+    
+    def init_weights(self):
+        """初始化模型权重"""
+        for name, param in self.lstm.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+        
+        nn.init.xavier_uniform_(self.fc.weight)
+        self.fc.bias.data.fill_(0.1)
+    
+    def forward(self, x):
+        """
+        前向传播
+        
+        参数:
+            x: 输入张量，形状为(batch_size, input_size)
+            
+        返回:
+            输出张量，形状为(batch_size, 4)
+        """
+        # 如果输入是二维的，添加一个序列维度
+        if x.dim() == 2:
+            x = x.unsqueeze(1)  # 形状变为(batch_size, 1, input_size)
+        
+        # LSTM前向传播
+        lstm_out, _ = self.lstm(x)
+        
+        # 取最后一个时间步的输出
+        last_output = lstm_out[:, -1, :]
+        
+        # 应用dropout
+        dropped_out = self.dropout(last_output)
+        
+        # 全连接层
+        output = self.fc(dropped_out)
+        
+        return output
 
 lstm_weight_bit_width = 8
 linear_weight_bit_width = 8
