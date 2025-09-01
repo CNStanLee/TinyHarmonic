@@ -302,10 +302,10 @@ def main():
 
     # 假设 signal 是您的输入信号
     # 创建小波包树
-    wp = pywt.WaveletPacket(data=signal, wavelet=wavelet, mode='symmetric', maxlevel=5)
+    wp = pywt.WaveletPacket(data=signal, wavelet=wavelet, mode='symmetric', maxlevel=4)
 
     # 获取所有节点路径
-    nodes = [node.path for node in wp.get_level(5, 'natural')]
+    nodes = [node.path for node in wp.get_level(4, 'natural')]
 
     print("小波包变换节点分析 (使用重建信号):")
     for path in nodes:
