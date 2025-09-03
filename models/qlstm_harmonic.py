@@ -12,17 +12,75 @@ import os
 import torch
 import torch.nn as nn
 
-class HarmonicEstimationLSTM(nn.Module):
+class HarmonicEstimationMLP(nn.Module):
     def __init__(self, input_size=64, hidden_size=128, num_layers=2, dropout=0.2):
         """
-        LSTM谐波估计模型
+        谐波估计MLP模型
         
         参数:
-            input_size: 输入特征维度 (默认为64)
-            hidden_size: LSTM隐藏层维度 (默认为128)
-            num_layers: LSTM层数 (默认为2)
-            dropout: Dropout概率 (默认为0.2)
+            input_size: 输入特征维度
+            hidden_size: 隐藏层维度
+            num_layers: 隐藏层数量
+            dropout: dropout概率
         """
+        super(HarmonicEstimationMLP, self).__init__()
+        
+        self.input_size = input_size
+        
+        # 构建MLP层
+        layers = []
+        
+        # 输入层
+        layers.append(nn.Linear(input_size, hidden_size))
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
+        
+        # 隐藏层
+        for _ in range(num_layers - 1):
+            layers.append(nn.Linear(hidden_size, hidden_size))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+        
+        # 输出层
+        layers.append(nn.Linear(hidden_size, 4))
+        
+        # 组合所有层
+        self.mlp = nn.Sequential(*layers)
+        
+        # 初始化权重
+        self.init_weights()
+    
+    def init_weights(self):
+        """初始化模型权重"""
+        for layer in self.mlp:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
+                if layer.bias is not None:
+                    layer.bias.data.fill_(0.1)
+    
+    def forward(self, x):
+        """
+        前向传播
+        
+        参数:
+            x: 输入张量，形状为(batch_size, input_size)
+            
+        返回:
+            输出张量，形状为(batch_size, 4)
+        """
+        # 确保输入是二维的 (batch_size, input_size)
+        if x.dim() > 2:
+            x = x.view(x.size(0), -1)
+        
+        # MLP前向传播
+        output = self.mlp(x)
+        
+        return output
+
+
+class HarmonicEstimationLSTM(nn.Module):
+    def __init__(self, input_size=64, hidden_size=128, num_layers=2, dropout=0.2):
+
         super(HarmonicEstimationLSTM, self).__init__()
         
         self.hidden_size = hidden_size

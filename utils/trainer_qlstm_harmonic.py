@@ -59,6 +59,16 @@ class HarmonicAwareLoss(nn.Module):
             fundamental_weight * harmonic_decay**3
         ])
         
+class WeightedMSELoss(nn.Module):
+    def __init__(self, weights):
+        super(WeightedMSELoss, self).__init__()
+        self.weights = weights
+
+    def forward(self, input, target):
+        se = (input - target) ** 2
+        weights = self.weights.to(se.device)
+        weighted_se = se * weights
+        return weighted_se.mean()
     def forward(self, outputs, targets):
         # 计算每个通道的MSE
         channel_errors = (outputs - targets) ** 2
@@ -111,6 +121,8 @@ class TrainerQLSTMHarmonic:
             self.criterion = nn.MSELoss()
         elif loss_type == "mae":
             self.criterion = nn.L1Loss()
+        elif loss_type == "weighted_mse":
+            self.criterion = WeightedMSELoss(weights=torch.tensor([1.0, 3.0, 5.0, 7.0]))
         else:
             self.criterion = nn.MSELoss()
         
@@ -470,7 +482,7 @@ class TrainerQLSTMHarmonic:
         plt.close()
 
     def test(self, testloader):
-        """在测试集上评估模型性能，包括相对误差百分比"""
+        """在测试集上评估模型性能，包括相对误差百分比，并打印3组输入、GT和模型输出"""
         self.model.eval()
         test_loss, test_mae, test_mse, test_r2 = 0.0, 0.0, 0.0, 0.0
         test_channel_mae = [0.0, 0.0, 0.0, 0.0]
@@ -481,16 +493,27 @@ class TrainerQLSTMHarmonic:
         all_outputs = []
         all_targets = []
         
+        # 用于存储前3组输入、GT和模型输出
+        sample_inputs = []
+        sample_targets = []
+        sample_outputs = []
+        
         test_pbar = tqdm(testloader, desc='Testing')
         
         with torch.no_grad():
-            for signals, targets, _ in test_pbar:
+            for batch_idx, (signals, targets, _) in enumerate(test_pbar):
                 # 将数据移动到设备
                 signals = signals.to(self.device)
                 targets = targets.to(self.device)
                 
                 # 前向传播
                 outputs = self.model(signals)
+                
+                # 保存前3组数据
+                if batch_idx < 3:
+                    sample_inputs.append(signals.cpu().numpy())
+                    sample_targets.append(targets.cpu().numpy())
+                    sample_outputs.append(outputs.cpu().numpy())
                 
                 # 计算损失
                 loss = self.criterion(outputs, targets)
@@ -521,6 +544,26 @@ class TrainerQLSTMHarmonic:
                     'MAE': f'{mae:.6f}',
                     'R2': f'{r2:.4f}'
                 })
+        
+        # 打印前3组输入、GT和模型输出
+        print("\n=== 前3组样本的输入、GT和模型输出 ===")
+        for i in range(min(3, len(sample_inputs))):
+            print(f"\n样本 {i+1}:")
+            print(f"输入信号形状: {sample_inputs[i].shape}")
+            print(f"GT (真实值): {sample_targets[i].flatten()}")
+            print(f"模型输出: {sample_outputs[i].flatten()}")
+            
+            # 计算并打印每个通道的相对误差百分比
+            gt = sample_targets[i].flatten()
+            pred = sample_outputs[i].flatten()
+            for ch in range(4):
+                abs_error = np.abs(pred[ch] - gt[ch])
+                denominator = gt[ch] if gt[ch] != 0 else np.abs(pred[ch])
+                if denominator == 0:
+                    pe = 0.0
+                else:
+                    pe = (abs_error / denominator) * 100
+                print(f"通道 {ch+1} 相对误差: {pe:.2f}%")
         
         # 计算平均测试指标
         avg_loss = test_loss / test_batches
@@ -560,7 +603,7 @@ class TrainerQLSTMHarmonic:
             overall_channel_mse.append(mean_squared_error(all_targets[:, i], all_outputs[:, i]))
             overall_channel_mae.append(mean_absolute_error(all_targets[:, i], all_outputs[:, i]))
         
-        print(f'Test Summary:')
+        print(f'\nTest Summary:')
         print(f'Average Loss: {avg_loss:.6f}, MSE: {avg_mse:.6f}, MAE: {avg_mae:.6f}, R²: {avg_r2:.4f}')
         print(f'Overall - MSE: {overall_mse:.6f}, MAE: {overall_mae:.6f}, R²: {overall_r2:.4f}')
         
@@ -594,6 +637,7 @@ class TrainerQLSTMHarmonic:
         # 绘制相对误差百分比直方图
         self.plot_percentage_error_histogram(all_outputs, all_targets)
         
+
         return all_outputs, all_targets
 
     def plot_predictions(self, outputs, targets):
@@ -669,7 +713,8 @@ class TrainerQLSTMHarmonic:
         
         np.savez(os.path.join(self.model_folder, 'percentage_error_stats.npz'), **pe_stats)
         
-        # 打印详细的统计信息
+
+
         print("\nPercentage Error Statistics:")
         for i in range(4):
             stats = pe_stats[f'channel_{i+1}']
