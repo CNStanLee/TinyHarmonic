@@ -101,7 +101,7 @@ class TrainerQLSTMHarmonic:
         # 创建模型文件夹
         if not os.path.exists(self.model_folder):
             os.makedirs(self.model_folder)
-            
+        print(f"Model folder: {self.model_folder}")
         # 将模型移动到设备
         self.model.to(self.device)
         
