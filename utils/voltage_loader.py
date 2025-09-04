@@ -86,10 +86,10 @@ def init_voltage_dataloaders(config, batch_size=32, shuffle=True, train_ratio=0.
     print(f"Test set size: {len(test_dataset)}")
     
     # 归一化
-    train_dataset.normalize()
-    val_dataset.normalize()
-    test_dataset.normalize()
-    
+    train_input_scale, train_output_scale = train_dataset.normalize()
+    val_input_scale, val_output_scale = val_dataset.normalize()
+    test_input_scale, test_output_scale = test_dataset.normalize()
+
     # 创建数据加载器
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -98,5 +98,11 @@ def init_voltage_dataloaders(config, batch_size=32, shuffle=True, train_ratio=0.
     return {
         'train': train_loader,
         'val': val_loader,
-        'test': test_loader
+        'test': test_loader,
+        'train_input_scale': train_input_scale,
+        'train_output_scale': train_output_scale,
+        'val_input_scale': val_input_scale,
+        'val_output_scale': val_output_scale,
+        'test_input_scale': test_input_scale,
+        'test_output_scale': test_output_scale
     }

@@ -11,7 +11,7 @@ class Config:
     INPUT_CYCLE_FRACTION = 0.5  # 1/2个周期作为输入
     OUTPUT_HARMONICS = [1, 3, 5, 7]  # 输出谐波次数
     EXTENSION_TIMES = 8
-    SLIDING_STEP = 5  # 滑动窗口步长
+    SLIDING_STEP = 6  # 滑动窗口步长
     
     # 输出参数
     TEMP_DATA_DIR = Path('processed_data')

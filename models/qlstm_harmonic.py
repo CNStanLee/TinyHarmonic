@@ -12,10 +12,253 @@ import os
 import torch
 import torch.nn as nn
 
-class HarmonicEstimationMLP(nn.Module):
-    def __init__(self, input_size=64, hidden_size=128, num_layers=2, dropout=0.2):
+# class HarmonicEstimationMLP(nn.Module):
+#     def __init__(self, input_size=64, hidden_size=128, num_layers=2, dropout=0.2):
+#         """
+#         谐波估计MLP模型
+        
+#         参数:
+#             input_size: 输入特征维度
+#             hidden_size: 隐藏层维度
+#             num_layers: 隐藏层数量
+#             dropout: dropout概率
+#         """
+#         super(HarmonicEstimationMLP, self).__init__()
+        
+#         self.input_size = input_size
+        
+#         # 构建MLP层
+#         layers = []
+        
+#         # 输入层
+#         layers.append(nn.Linear(input_size, hidden_size))
+#         layers.append(nn.ReLU())
+#         layers.append(nn.Dropout(dropout))
+        
+#         # 隐藏层
+#         for _ in range(num_layers - 1):
+#             layers.append(nn.Linear(hidden_size, hidden_size))
+#             layers.append(nn.ReLU())
+#             layers.append(nn.Dropout(dropout))
+        
+#         # 输出层
+#         layers.append(nn.Linear(hidden_size, 4))
+        
+#         # 组合所有层
+#         self.mlp = nn.Sequential(*layers)
+        
+#         # 初始化权重
+#         self.init_weights()
+    
+#     def init_weights(self):
+#         """初始化模型权重"""
+#         for layer in self.mlp:
+#             if isinstance(layer, nn.Linear):
+#                 nn.init.xavier_uniform_(layer.weight)
+#                 if layer.bias is not None:
+#                     layer.bias.data.fill_(0.1)
+    
+#     def forward(self, x):
+#         """
+#         前向传播
+        
+#         参数:
+#             x: 输入张量，形状为(batch_size, input_size)
+            
+#         返回:
+#             输出张量，形状为(batch_size, 4)
+#         """
+#         # 确保输入是二维的 (batch_size, input_size)
+#         if x.dim() > 2:
+#             x = x.view(x.size(0), -1)
+        
+#         # MLP前向传播
+#         output = self.mlp(x)
+        
+#         return output
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch
+import torch.nn as nn
+
+class MultiHeadHarmonicEstimationLSTM(nn.Module):
+    def __init__(self, input_size=32, lstm_hidden_size=128, lstm_layers=2, 
+                 mlp_hidden_size=256, mlp_layers=5, dropout=0.2):
         """
-        谐波估计MLP模型
+        带LSTM特征提取的多头谐波估计MLP模型
+        
+        参数:
+            input_size: 输入特征维度
+            lstm_hidden_size: LSTM隐藏层维度
+            lstm_layers: LSTM层数
+            mlp_hidden_size: MLP隐藏层维度
+            mlp_layers: MLP隐藏层数量
+            dropout: dropout概率
+        """
+        super(MultiHeadHarmonicEstimationLSTM, self).__init__()
+        self.input_size = input_size
+        
+        # LSTM特征提取层
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=lstm_hidden_size,
+            num_layers=lstm_layers,
+            batch_first=True,
+            bidirectional=False,
+            dropout=dropout if lstm_layers > 1 else 0
+        )
+        
+        # LSTM输出后的全连接层，用于降维和特征提取
+        self.lstm_fc = nn.Sequential(
+            nn.Linear(lstm_hidden_size, mlp_hidden_size),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.BatchNorm1d(mlp_hidden_size),
+            nn.Dropout(dropout)
+        )
+        
+        # 共享的特征提取backbone (MLP部分)
+        backbone_layers = []
+        
+        # 输入层
+        backbone_layers.append(nn.Linear(mlp_hidden_size, mlp_hidden_size))
+        backbone_layers.append(nn.LeakyReLU(negative_slope=0.01))
+        backbone_layers.append(nn.BatchNorm1d(mlp_hidden_size))
+        backbone_layers.append(nn.Dropout(dropout))
+        
+        # 隐藏层
+        for _ in range(mlp_layers - 1):
+            backbone_layers.append(nn.Linear(mlp_hidden_size, mlp_hidden_size))
+            backbone_layers.append(nn.LeakyReLU(negative_slope=0.01))
+            backbone_layers.append(nn.BatchNorm1d(mlp_hidden_size))
+            backbone_layers.append(nn.Dropout(dropout))
+        
+        self.backbone = nn.Sequential(*backbone_layers)
+        
+        # 四个独立的输出头，每个对应一个谐波
+        self.head1 = nn.Sequential(
+            nn.Linear(mlp_hidden_size, mlp_hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 4, mlp_hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 4, 1),
+            nn.Tanh()  # 限制输出在[-1, 1]范围内
+        )
+
+        self.head3 = nn.Sequential(
+            nn.Linear(mlp_hidden_size, mlp_hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 4, mlp_hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 4, 1),
+            nn.Tanh()  # 限制输出在[-1, 1]范围内
+        )
+        
+        self.head5 = nn.Sequential(
+            nn.Linear(mlp_hidden_size, mlp_hidden_size // 2),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 2, mlp_hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 4, mlp_hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 4, 1),
+            nn.Tanh()  # 限制输出在[-1, 1]范围内
+        )
+        
+        self.head7 = nn.Sequential(
+            nn.Linear(mlp_hidden_size, mlp_hidden_size // 2),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 2, mlp_hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 4, mlp_hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(mlp_hidden_size // 4, 1),
+            nn.Tanh()  # 限制输出在[-1, 1]范围内
+        )
+        
+        # 初始化权重
+        self.init_weights()
+    
+    def init_weights(self):
+        """初始化模型权重"""
+        # 初始化LSTM
+        for name, param in self.lstm.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                param.data.fill_(0)
+                # 设置遗忘门偏置为1，有助于梯度流动
+                n = param.size(0)
+                param.data[n//4:n//2].fill_(1)
+        
+        # 初始化LSTM后的全连接层
+        for layer in self.lstm_fc:
+            if isinstance(layer, nn.Linear):
+                nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0.1)
+        
+        # 初始化backbone
+        for layer in self.backbone:
+            if isinstance(layer, nn.Linear):
+                nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0.1)
+        
+        # 初始化各个头
+        for head in [self.head1, self.head3, self.head5, self.head7]:
+            for layer in head:
+                if isinstance(layer, nn.Linear):
+                    nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                    if layer.bias is not None:
+                        # 最后一层初始化为0，其他层初始化为0.1
+                        if layer == head[-2]:  # 倒数第二层是线性层
+                            nn.init.constant_(layer.bias, 0.0)
+                        else:
+                            nn.init.constant_(layer.bias, 0.1)
+    
+    def forward(self, x):
+        """
+        前向传播
+        
+        参数:
+            x: 输入张量，形状为(batch_size, seq_len, input_size)
+            
+        返回:
+            输出张量，形状为(batch_size, 4)
+        """
+        # 确保输入是三维的 (batch_size, seq_len, input_size)
+        if x.dim() == 2:
+            # 如果输入是二维的，添加序列维度
+            x = x.unsqueeze(1)
+        
+        # 通过LSTM提取时序特征
+        lstm_out, (hn, cn) = self.lstm(x)
+        # 取最后一个时间步的输出
+        lstm_features = lstm_out[:, -1, :]
+        
+        # 通过全连接层调整特征维度
+        features = self.lstm_fc(lstm_features)
+        
+        # 通过共享backbone提取特征
+        mlp_features = self.backbone(features)
+        
+        # 通过各个头预测不同谐波
+        harmonic1 = self.head1(mlp_features)
+        harmonic3 = self.head3(mlp_features)
+        harmonic5 = self.head5(mlp_features)
+        harmonic7 = self.head7(mlp_features)
+        
+        # 拼接所有谐波预测
+        output = torch.cat([harmonic1, harmonic3, harmonic5, harmonic7], dim=1)
+        
+        return output
+class MultiHeadHarmonicEstimationMLP(nn.Module):
+    def __init__(self, input_size=32, hidden_size=256, num_layers=5, dropout=0.2):
+        """
+        多头谐波估计MLP模型
         
         参数:
             input_size: 输入特征维度
@@ -23,40 +266,92 @@ class HarmonicEstimationMLP(nn.Module):
             num_layers: 隐藏层数量
             dropout: dropout概率
         """
-        super(HarmonicEstimationMLP, self).__init__()
-        
+        super(MultiHeadHarmonicEstimationMLP, self).__init__()
         self.input_size = input_size
         
-        # 构建MLP层
-        layers = []
+        # 共享的特征提取backbone
+        backbone_layers = []
         
         # 输入层
-        layers.append(nn.Linear(input_size, hidden_size))
-        layers.append(nn.ReLU())
-        layers.append(nn.Dropout(dropout))
+        backbone_layers.append(nn.Linear(input_size, hidden_size))
+        backbone_layers.append(nn.LeakyReLU(negative_slope=0.01))
+        backbone_layers.append(nn.BatchNorm1d(hidden_size))
+        backbone_layers.append(nn.Dropout(dropout))
         
         # 隐藏层
         for _ in range(num_layers - 1):
-            layers.append(nn.Linear(hidden_size, hidden_size))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout))
+            backbone_layers.append(nn.Linear(hidden_size, hidden_size))
+            backbone_layers.append(nn.LeakyReLU(negative_slope=0.01))
+            backbone_layers.append(nn.BatchNorm1d(hidden_size))
+            backbone_layers.append(nn.Dropout(dropout))
         
-        # 输出层
-        layers.append(nn.Linear(hidden_size, 4))
+        self.backbone = nn.Sequential(*backbone_layers)
         
-        # 组合所有层
-        self.mlp = nn.Sequential(*layers)
+        # 四个独立的输出头，每个对应一个谐波
+        self.head1 = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 4, hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 4, 1),
+            nn.Tanh()  # 限制输出在[-1, 1]范围内
+        )
+
+        
+        self.head3 = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 4, hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 4, 1),
+            nn.Tanh()  # 限制输出在[-1, 1]范围内
+        )
+        
+        self.head5 = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 2, hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 4, hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 4, 1),
+            nn.Tanh()  # 限制输出在[-1, 1]范围内
+        )
+        
+        self.head7 = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 2, hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 4, hidden_size // 4),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.Linear(hidden_size // 4, 1),
+            nn.Tanh()  # 限制输出在[-1, 1]范围内
+        )
         
         # 初始化权重
         self.init_weights()
     
     def init_weights(self):
         """初始化模型权重"""
-        for layer in self.mlp:
+        # 初始化backbone
+        for layer in self.backbone:
             if isinstance(layer, nn.Linear):
-                nn.init.xavier_uniform_(layer.weight)
+                nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
                 if layer.bias is not None:
-                    layer.bias.data.fill_(0.1)
+                    nn.init.constant_(layer.bias, 0.1)
+        
+        # 初始化各个头
+        for head in [self.head1, self.head3, self.head5, self.head7]:
+            for layer in head:
+                if isinstance(layer, nn.Linear):
+                    nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                    if layer.bias is not None:
+                        # 最后一层初始化为0，其他层初始化为0.1
+                        if layer == head[-2]:  # 倒数第二层是线性层
+                            nn.init.constant_(layer.bias, 0.0)
+                        else:
+                            nn.init.constant_(layer.bias, 0.1)
     
     def forward(self, x):
         """
@@ -72,12 +367,61 @@ class HarmonicEstimationMLP(nn.Module):
         if x.dim() > 2:
             x = x.view(x.size(0), -1)
         
-        # MLP前向传播
-        output = self.mlp(x)
+        # 通过共享backbone提取特征
+        features = self.backbone(x)
+        
+        # 通过各个头预测不同谐波
+        harmonic1 = self.head1(features)
+        harmonic3 = self.head3(features)
+        harmonic5 = self.head5(features)
+        harmonic7 = self.head7(features)
+        
+        # 拼接所有谐波预测
+        output = torch.cat([harmonic1, harmonic3, harmonic5, harmonic7], dim=1)
         
         return output
-
-
+class HarmonicEstimationMLP(nn.Module):
+    def __init__(self, input_size=32, hidden_size=256, num_layers=5, dropout=0.2):
+        super(HarmonicEstimationMLP, self).__init__()
+        self.input_size = input_size
+        
+        layers = []
+        # 输入层
+        layers.append(nn.Linear(input_size, hidden_size))
+        layers.append(nn.LeakyReLU(negative_slope=0.01))
+        layers.append(nn.BatchNorm1d(hidden_size))
+        layers.append(nn.Dropout(dropout))
+        
+        # 隐藏层
+        for _ in range(num_layers - 1):
+            layers.append(nn.Linear(hidden_size, hidden_size))
+            layers.append(nn.LeakyReLU(negative_slope=0.01))
+            layers.append(nn.BatchNorm1d(hidden_size))
+            layers.append(nn.Dropout(dropout))
+        
+        # 输出层
+        layers.append(nn.Linear(hidden_size, 4))
+        
+        self.mlp = nn.Sequential(*layers)
+        self.init_weights()
+    
+    def init_weights(self):
+        for layer in self.mlp:
+            if isinstance(layer, nn.Linear):
+                # 使用He初始化
+                nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                if layer.bias is not None:
+                    # 输出层偏差初始化为0，其他层初始化为0.1
+                    if layer == self.mlp[-1]:  # 输出层
+                        nn.init.constant_(layer.bias, 0.0)
+                    else:
+                        nn.init.constant_(layer.bias, 0.1)
+    
+    def forward(self, x):
+        if x.dim() > 2:
+            x = x.view(x.size(0), -1)
+        return self.mlp(x)
+    
 class HarmonicEstimationLSTM(nn.Module):
     def __init__(self, input_size=64, hidden_size=128, num_layers=2, dropout=0.2):
 

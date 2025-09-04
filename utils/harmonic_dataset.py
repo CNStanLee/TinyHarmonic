@@ -68,6 +68,8 @@ class HarmonicDataset:
         print(f"Outputs normalized per channel:")
         for i, scale in enumerate(output_max_abs):
             print(f"  Channel {i}: mapped from [-{scale:.2f}, {scale:.2f}] to [-1, 1]")
+        
+        return self.input_scale, self.output_scale
     
     def denormalize_outputs(self, y_norm):
         """将归一化后的输出反归一化回原始范围（支持多通道）"""

@@ -86,6 +86,7 @@ class TrainerQLSTMHarmonic:
                  model, 
                  trainloader, 
                  validationloader, 
+                 test_loader,
                  train_batch_size, 
                  val_batch_size, 
                  num_epochs, 
@@ -95,6 +96,7 @@ class TrainerQLSTMHarmonic:
                  input_length=64,
                  epsilon=1e-8,
                  loss_type="combined",
+                 weights_arrange=torch.tensor([1.0, 7.0, 7.0, 7.0]),
                  lr_scheduler=None,
                  grad_clip=1.0,
                  early_stopping_patience=20):
@@ -111,7 +113,8 @@ class TrainerQLSTMHarmonic:
         self.epsilon = epsilon
         self.grad_clip = grad_clip
         self.early_stopping_patience = early_stopping_patience
-        
+        self.weights_arrange = weights_arrange
+        self.test_loader = test_loader
         # 选择损失函数
         if loss_type == "combined":
             self.criterion = CombinedLoss(alpha=0.7, beta=0.3, epsilon=epsilon)
@@ -122,7 +125,7 @@ class TrainerQLSTMHarmonic:
         elif loss_type == "mae":
             self.criterion = nn.L1Loss()
         elif loss_type == "weighted_mse":
-            self.criterion = WeightedMSELoss(weights=torch.tensor([1.0, 3.0, 5.0, 7.0]))
+            self.criterion = WeightedMSELoss(weights=self.weights_arrange)
         else:
             self.criterion = nn.MSELoss()
         
@@ -183,7 +186,7 @@ class TrainerQLSTMHarmonic:
             
             # 避免除以零 - 对于真实值为零的情况，使用预测值的绝对值作为分母
             denominator = np.where(abs_labels == 0, np.abs(outputs_np[:, i]), abs_labels)
-            denominator[denominator == 0] = self.epsilon  # 确保分母不为零
+            denominator[denominator <= self.epsilon] = self.epsilon  # 确保分母不为零
             
             # 计算相对误差百分比
             pe = np.mean(abs_errors / denominator) * 100
@@ -384,17 +387,18 @@ class TrainerQLSTMHarmonic:
                     break
             
             # 定期保存检查点
-            # if (epoch + 1) % 10 == 0:
-            #     torch.save(self.model.state_dict(), os.path.join(self.model_folder, f'model_epoch_{epoch+1}.pt'))
+            if (epoch + 1) % 20 == 0:
+                #torch.save(self.model.state_dict(), os.path.join(self.model_folder, f'model_epoch_{epoch+1}.pt'))
                 
-                # 绘制训练曲线
-                #self.plot_training_progress()
+                #绘制训练曲线
+                self.plot_training_progress()
+                self.test(self.test_loader)
         
         # 保存最终模型
         torch.save(self.model.state_dict(), os.path.join(self.model_folder, 'final_model.pt'))
         
         # 绘制最终训练曲线
-        #self.plot_training_progress()
+        self.plot_training_progress()
         
         # 保存训练历史
         np.savez(os.path.join(self.model_folder, 'training_history.npz'),
@@ -443,8 +447,9 @@ class TrainerQLSTMHarmonic:
         # 绘制相对误差百分比曲线
         colors = ['blue', 'green', 'red', 'purple']
         for i in range(4):
-            axes[0, 2].plot(epochs, self.train_channel_pe[:, i], f'{colors[i]}-', alpha=0.7, label=f'Channel {i+1} Train PE')
-            axes[0, 2].plot(epochs, self.val_channel_pe[:, i], f'{colors[i]}--', alpha=0.7, label=f'Channel {i+1} Val PE')
+            axes[0, 2].plot(epochs, self.train_channel_pe[:, i], color=colors[i], linestyle='-', alpha=0.7, label=f'Channel {i+1} Train PE')
+            axes[0, 2].plot(epochs, self.val_channel_pe[:, i], color=colors[i], linestyle='--', alpha=0.7, label=f'Channel {i+1} Val PE')
+
         axes[0, 2].set_title('Percentage Error by Channel')
         axes[0, 2].set_xlabel('Epochs')
         axes[0, 2].set_ylabel('Percentage Error (%)')
@@ -545,25 +550,26 @@ class TrainerQLSTMHarmonic:
                     'R2': f'{r2:.4f}'
                 })
         
-        # 打印前3组输入、GT和模型输出
-        print("\n=== 前3组样本的输入、GT和模型输出 ===")
-        for i in range(min(3, len(sample_inputs))):
-            print(f"\n样本 {i+1}:")
-            print(f"输入信号形状: {sample_inputs[i].shape}")
-            print(f"GT (真实值): {sample_targets[i].flatten()}")
-            print(f"模型输出: {sample_outputs[i].flatten()}")
+        # # 打印前3组输入、GT和模型输出
+        # print("\n=== 前3组样本的输入、GT和模型输出 ===")
+        # for i in range(min(3, len(sample_inputs))):
+        #     print(f"\n样本 {i+1}:")
+        #     print(f"输入信号形状: {sample_inputs[i].shape}")
+        #     print(f"GT (真实值): {sample_targets[i].flatten()}")
+        #     print(f"模型输出: {sample_outputs[i].flatten()}")
             
-            # 计算并打印每个通道的相对误差百分比
-            gt = sample_targets[i].flatten()
-            pred = sample_outputs[i].flatten()
-            for ch in range(4):
-                abs_error = np.abs(pred[ch] - gt[ch])
-                denominator = gt[ch] if gt[ch] != 0 else np.abs(pred[ch])
-                if denominator == 0:
-                    pe = 0.0
-                else:
-                    pe = (abs_error / denominator) * 100
-                print(f"通道 {ch+1} 相对误差: {pe:.2f}%")
+        #     # 计算并打印每个通道的相对误差百分比
+        #     gt = sample_targets[i].flatten()
+        #     pred = sample_outputs[i].flatten()
+        #     for ch in range(4):
+        #         abs_error = np.abs(pred[ch] - gt[ch])
+        #         denominator = gt[ch] if gt[ch] != 0 else np.abs(pred[ch])
+        #         denominator[denominator <= self.epsilon] = self.epsilon
+        #         # if denominator == 0:
+        #         #     pe = 0.0
+        #         # else:
+        #         pe = (abs_error / denominator) * 100
+        #         print(f"通道 {ch+1} 相对误差: {pe:.2f}%")
         
         # 计算平均测试指标
         avg_loss = test_loss / test_batches
@@ -591,7 +597,7 @@ class TrainerQLSTMHarmonic:
         
         # 避免除以零 - 对于真实值为零的情况，使用预测值的绝对值作为分母
         denominator = np.where(abs_labels == 0, np.abs(all_outputs), abs_labels)
-        denominator[denominator == 0] = self.epsilon  # 确保分母不为零
+        denominator[denominator <= self.epsilon] = self.epsilon
         
         # 计算整体相对误差百分比
         overall_pe = np.mean(abs_errors / denominator, axis=0) * 100
@@ -670,7 +676,7 @@ class TrainerQLSTMHarmonic:
         
         # 避免除以零
         denominator = np.where(abs_labels == 0, np.abs(outputs), abs_labels)
-        denominator[denominator == 0] = self.epsilon
+        denominator[denominator <= self.epsilon] = self.epsilon
         
         percentage_errors = (abs_errors / denominator) * 100
         
