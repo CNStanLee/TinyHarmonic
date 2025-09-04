@@ -11,7 +11,109 @@ import time
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
+class HarmonicEstimationCNNLSTM(nn.Module):
+    def __init__(self, input_size=32, cnn_channels=64, kernel_size=3, 
+                 lstm_hidden_size=128, lstm_num_layers=2, 
+                 mlp_hidden_size=256, mlp_num_layers=3, dropout=0.2, num_heads=4):
+        super(HarmonicEstimationCNNLSTM, self).__init__()
+        self.input_size = input_size
+        self.num_heads = num_heads
+        
+        # 1D CNN 部分
+        self.cnn = nn.Sequential(
+            nn.Conv1d(1, cnn_channels, kernel_size, padding=kernel_size//2),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.BatchNorm1d(cnn_channels),
+            nn.Dropout(dropout),
+            nn.Conv1d(cnn_channels, cnn_channels*2, kernel_size, padding=kernel_size//2),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.BatchNorm1d(cnn_channels*2),
+            nn.Dropout(dropout),
+            nn.AdaptiveAvgPool1d(16)  # 自适应池化到固定长度
+        )
+        
+        # LSTM 部分
+        self.lstm = nn.LSTM(
+            input_size=cnn_channels*2,
+            hidden_size=lstm_hidden_size,
+            num_layers=lstm_num_layers,
+            batch_first=True,
+            dropout=dropout if lstm_num_layers > 1 else 0,
+            bidirectional=False
+        )
+        
+        # 多头MLP部分
+        self.mlp_heads = nn.ModuleList()
+        for _ in range(num_heads):
+            layers = []
+            # 输入层
+            layers.append(nn.Linear(lstm_hidden_size, mlp_hidden_size))
+            layers.append(nn.LeakyReLU(negative_slope=0.01))
+            layers.append(nn.BatchNorm1d(mlp_hidden_size))
+            layers.append(nn.Dropout(dropout))
+            
+            # 隐藏层
+            for _ in range(mlp_num_layers - 1):
+                layers.append(nn.Linear(mlp_hidden_size, mlp_hidden_size))
+                layers.append(nn.LeakyReLU(negative_slope=0.01))
+                layers.append(nn.BatchNorm1d(mlp_hidden_size))
+                layers.append(nn.Dropout(dropout))
+            
+            # 输出层（每个头输出1个值）
+            layers.append(nn.Linear(mlp_hidden_size, 1))
+            
+            self.mlp_heads.append(nn.Sequential(*layers))
+        
+        self.init_weights()
+    
+    def init_weights(self):
+        # 初始化CNN权重
+        for layer in self.cnn:
+            if isinstance(layer, nn.Conv1d):
+                nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0.1)
+        
+        # 初始化LSTM权重
+        for name, param in self.lstm.named_parameters():
+            if 'weight' in name:
+                nn.init.orthogonal_(param)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0.1)
+        
+        # 初始化MLP头权重
+        for head in self.mlp_heads:
+            for layer in head:
+                if isinstance(layer, nn.Linear):
+                    nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                    if layer.bias is not None:
+                        if layer == head[-1]:  # 输出层
+                            nn.init.constant_(layer.bias, 0.0)
+                        else:
+                            nn.init.constant_(layer.bias, 0.1)
+    
+    def forward(self, x):
+        # 输入形状: (batch_size, input_size)
+        if x.dim() == 2:
+            x = x.unsqueeze(1)  # 增加通道维度: (batch_size, 1, input_size)
+        
+        # 1D CNN处理
+        cnn_out = self.cnn(x)  # 形状: (batch_size, cnn_channels*2, 16)
+        cnn_out = cnn_out.permute(0, 2, 1)  # 调整为LSTM输入格式: (batch_size, 16, cnn_channels*2)
+        
+        # LSTM处理
+        lstm_out, _ = self.lstm(cnn_out)  # 形状: (batch_size, 16, lstm_hidden_size)
+        lstm_out = lstm_out[:, -1, :]  # 取最后一个时间步的输出: (batch_size, lstm_hidden_size)
+        
+        # 多头MLP处理
+        outputs = []
+        for head in self.mlp_heads:
+            outputs.append(head(lstm_out))
+        
+        # 将所有头的输出拼接起来
+        return torch.cat(outputs, dim=1)  # 形状: (batch_size, num_heads)
 # class HarmonicEstimationMLP(nn.Module):
 #     def __init__(self, input_size=64, hidden_size=128, num_layers=2, dropout=0.2):
 #         """
@@ -76,11 +178,7 @@ import torch.nn as nn
 #         output = self.mlp(x)
         
 #         return output
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch
-import torch.nn as nn
+
 
 class MultiHeadHarmonicEstimationLSTM(nn.Module):
     def __init__(self, input_size=32, lstm_hidden_size=128, lstm_layers=2, 

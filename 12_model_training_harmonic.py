@@ -13,7 +13,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import StepLR
 # ---------------------------------------------------------
-from models.qlstm_harmonic import QLSTMHarmonic, HarmonicEstimationLSTM, HarmonicEstimationMLP, MultiHeadHarmonicEstimationLSTM, MultiHeadHarmonicEstimationMLP
+from models.qlstm_harmonic import QLSTMHarmonic, HarmonicEstimationLSTM, HarmonicEstimationMLP, MultiHeadHarmonicEstimationLSTM, MultiHeadHarmonicEstimationMLP, HarmonicEstimationCNNLSTM
 from utils.trainer_qlstm_harmonic import TrainerQLSTMHarmonic
 from utils.data_init import data_init
 # --------------------------------------------------------
@@ -53,6 +53,7 @@ def case_A1():
     model_f32 = HarmonicEstimationMLP(input_size=input_size,
                                        hidden_size=hidden_size,
                                        num_layers=num_layers).to(device)
+
     optimizer = optim.Adam(model_f32.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=5, verbose=True
@@ -81,8 +82,8 @@ def case_real():
     # --------------------------------------------------------
     input_cycle_fraction = 1
     input_size = int(input_cycle_fraction * 64)
-    hidden_size = 256
-    num_layers = 3
+    hidden_size = 1024
+    num_layers = 2
     # --------------------------------------------------------
     # hyperparameters
     # --------------------------------------------------------
@@ -108,19 +109,19 @@ def case_real():
     #batch_size = 16       # 一批样本数
     #seq_len = 50          # 序列长度 (时序长度)
     #input_size = 32       # 每个时间步输入特征维度
-    input_size = 64
-    hidden_size = 256     # MLP隐藏层维度
+    #input_size = 64
+    #hidden_size = 512     # MLP隐藏层维度
     lstm_hidden = 128     # LSTM隐藏层维度
     lstm_layers = 2       # LSTM层数
-
-    # ====== 创建模型 ======
-    # model_f32 = MultiHeadHarmonicEstimationLSTM(
-    #     input_size=input_size, lstm_hidden_size=lstm_hidden, lstm_layers=lstm_layers, 
-    #     mlp_hidden_size=hidden_size, mlp_layers=5, dropout=0.2
-    # ).to(device)
-    model_f32 = MultiHeadHarmonicEstimationMLP(
-        input_size=input_size, hidden_size=hidden_size, num_layers=5, dropout=0.2
-    ).to(device)
+    model_f32 = HarmonicEstimationCNNLSTM(input_size=input_size,
+                                           cnn_channels=64,
+                                           kernel_size=3,
+                                           lstm_hidden_size=128,
+                                           lstm_num_layers=2,
+                                           mlp_hidden_size=256,
+                                           mlp_num_layers=3,
+                                           dropout=0.2,
+                                           num_heads=4).to(device)
     
     optimizer = optim.Adam(model_f32.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -139,12 +140,13 @@ def case_real():
         model_folder="./models",
         device=device,
         # loss_type="combined",
-        epsilon=1e-2,
-        loss_type="weighted_mse",
-        weights_arrange=torch.tensor([1.0, 3.0, 3.0, 3.0]),
+        epsilon=5e-3,
+        loss_type="harmonic_log_mse",
+        weights_arrange=torch.tensor([1.0, 1.0, 5.0, 5.0]),
         lr_scheduler=scheduler,
         grad_clip=1.0,
-        early_stopping_patience=early_stopping_patience
+        early_stopping_patience=early_stopping_patience,
+        error_metric="smape"
     )
     # train the model and test
     trainer.train()
