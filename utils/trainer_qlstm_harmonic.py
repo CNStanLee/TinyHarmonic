@@ -34,7 +34,9 @@ class TrainerQLSTMHarmonic:
                  lr_scheduler=None,
                  grad_clip=1.0,
                  early_stopping_patience=20,
-                 error_metric="pe"):  # 新增参数：误差度量指标，可选"pe"或"smape"
+                 error_metric="pe",
+                 test_input_scale=None,
+                 test_output_scale=None):  # 新增参数：误差度量指标，可选"pe"或"smape"
         self.model = model
         self.trainloader = trainloader
         self.validationloader = validationloader
@@ -51,7 +53,8 @@ class TrainerQLSTMHarmonic:
         self.weights_arrange = weights_arrange
         self.test_loader = test_loader
         self.error_metric = error_metric  # 保存误差度量指标
-
+        self.test_input_scale = test_input_scale
+        self.test_output_scale = test_output_scale
         self.num_features = input_length
         self.test_length = len(test_loader.dataset)
 
@@ -512,32 +515,227 @@ class TrainerQLSTMHarmonic:
         test_channel_error = [0.0, 0.0, 0.0, 0.0]  # 改为通用误差指标
         test_tmape = 0.0  # 整体TMAPE
         test_batches = 0
+        test_inference_time = 0.0
         
         all_outputs = []
         all_targets = []
         
-        # 用于存储前3组输入、GT和模型输出
-        sample_inputs = []
-        sample_targets = []
-        sample_outputs = []
-        
+       
         test_pbar = tqdm(testloader, desc='Testing')
         
         with torch.no_grad():
+            # 处理 test_output_scale：转换NumPy数组为张量并移动到设备
+            test_output_scale = self.test_output_scale if self.test_output_scale is not None else 1.0
+            if isinstance(test_output_scale, np.ndarray):  # 检查是否为NumPy数组
+                test_output_scale = torch.from_numpy(test_output_scale).to(self.device)
+            else:
+                test_output_scale = torch.tensor(test_output_scale, device=self.device)  # 标量直接转换为张量
+            
+            # 处理 test_input_scale（同样逻辑）
+            test_input_scale = self.test_input_scale if self.test_input_scale is not None else 1.0
+            if isinstance(test_input_scale, np.ndarray):
+                test_input_scale = torch.from_numpy(test_input_scale).to(self.device)
+            else:
+                test_input_scale = torch.tensor(test_input_scale, device=self.device)
             for batch_idx, (signals, targets, _) in enumerate(test_pbar):
                 # 将数据移动到设备
                 signals = signals.to(self.device)
                 targets = targets.to(self.device)
-                
+
                 # 前向传播
+                begin_time = time.time()
                 outputs = self.model(signals)
+                end_time = time.time()
+                inference_time = end_time - begin_time
+                # change the scale
+                outputs = outputs * test_output_scale
+                targets = targets * test_output_scale
+
+                # 计算损失
+                loss = self.criterion(outputs, targets)
                 
-                # 保存前3组数据
-                if batch_idx < 3:
-                    sample_inputs.append(signals.cpu().numpy())
-                    sample_targets.append(targets.cpu().numpy())
-                    sample_outputs.append(outputs.cpu().numpy())
+                # 计算指标
+                mse, mae, r2, adjusted_r2, channel_mae, channel_mse, channel_error = self.compute_metrics(outputs, targets)
+                test_loss += loss.item()
+                test_mse += mse
+                test_mae += mae
+                test_r2 += r2
+                test_adjusted_r2 += adjusted_r2
+                test_inference_time += inference_time
+
+                # 计算TMAPE
+                tmape = self.compute_tmape(outputs, targets)
+                test_tmape += tmape
                 
+                # 累加每个通道的指标
+                for i in range(4):
+                    test_channel_mae[i] += channel_mae[i]
+                    test_channel_mse[i] += channel_mse[i]
+                    test_channel_error[i] += channel_error[i]
+                    
+                test_batches += 1
+                
+                # 保存所有预测和真实值
+                all_outputs.append(outputs.cpu().numpy())
+                all_targets.append(targets.cpu().numpy())
+                
+                # 更新进度条
+                test_pbar.set_postfix({
+                    'Loss': f'{loss.item():.6f}',
+                    'MSE': f'{mse:.6f}',
+                    'MAE': f'{mae:.6f}',
+                    'R2': f'{r2:.4f}',
+                    'Adj R2': f'{adjusted_r2:.4f}'
+                })
+        
+        # 计算平均测试指标
+        avg_loss = test_loss / test_batches
+        avg_mse = test_mse / test_batches
+        avg_mae = test_mae / test_batches
+        avg_r2 = test_r2 / test_batches
+        avg_adjusted_r2 = test_adjusted_r2 / test_batches
+        avg_tmape = test_tmape / test_batches
+        avg_inference_time = test_inference_time / test_batches
+        print(f'Average inference time per batch: {avg_inference_time*1000:.2f} ms')
+        
+        # 计算每个通道的平均指标
+        avg_channel_mae = [mae / test_batches for mae in test_channel_mae]
+        avg_channel_mse = [mse / test_batches for mse in test_channel_mse]
+        avg_channel_error = [error / test_batches for error in test_channel_error]
+        
+        # 合并所有预测和真实值
+        all_outputs = np.vstack(all_outputs)
+        all_targets = np.vstack(all_targets)
+        
+        # 计算整体指标
+        overall_mse = mean_squared_error(all_targets, all_outputs)
+        overall_mae = mean_absolute_error(all_targets, all_outputs)
+        overall_r2 = r2_score(all_targets, all_outputs)
+        overall_adjusted_r2 = self.compute_adjusted_r2(overall_r2, len(all_targets), self.num_params)
+        overall_tmape = self.compute_tmape(torch.tensor(all_outputs), torch.tensor(all_targets))
+        
+        # 计算选择的误差度量指标
+        overall_error = self.compute_error_metric(torch.tensor(all_outputs), torch.tensor(all_targets))
+        
+        # 计算每个通道的整体指标
+        overall_channel_mae = []
+        overall_channel_mse = []
+        for i in range(4):
+            overall_channel_mse.append(mean_squared_error(all_targets[:, i], all_outputs[:, i]))
+            overall_channel_mae.append(mean_absolute_error(all_targets[:, i], all_outputs[:, i]))
+        
+        # 打印测试结果
+        error_metric_name = "PE" if self.error_metric == "pe" else "sMAPE"
+        print(f'\nTest Summary:')
+        print(f'Average Loss: {avg_loss:.6f}, MSE: {avg_mse:.6f}, MAE: {avg_mae:.6f}, R²: {avg_r2:.4f}, Adj R²: {avg_adjusted_r2:.4f}')
+        print(f'Average TMAPE: {avg_tmape:.2f}%')
+        print(f'Overall - MSE: {overall_mse:.6f}, MAE: {overall_mae:.6f}, R²: {overall_r2:.4f}, Adj R²: {overall_adjusted_r2:.4f}, TMAPE: {overall_tmape:.2f}%')
+        
+        # 打印每个通道的指标
+        for i in range(4):
+            print(f'Channel {i+1}:')
+            print(f'  Average - MSE: {avg_channel_mse[i]:.6f}, MAE: {avg_channel_mae[i]:.6f}, {error_metric_name}: {avg_channel_error[i]:.2f}%')
+            print(f'  Overall - MSE: {overall_channel_mse[i]:.6f}, MAE: {overall_channel_mae[i]:.6f}, {error_metric_name}: {overall_error[i]:.2f}%')
+        
+        # 保存测试结果
+        np.savez(os.path.join(self.model_folder, 'test_results.npz'),
+                outputs=all_outputs,
+                targets=all_targets,
+                avg_loss=avg_loss,
+                avg_mse=avg_mse,
+                avg_mae=avg_mae,
+                avg_r2=avg_r2,
+                avg_adjusted_r2=avg_adjusted_r2,  # 新增
+                avg_tmape=avg_tmape,
+                avg_channel_mae=avg_channel_mae,
+                avg_channel_mse=avg_channel_mse,
+                avg_channel_error=avg_channel_error,
+                overall_mse=overall_mse,
+                overall_mae=overall_mae,
+                overall_r2=overall_r2,
+                overall_adjusted_r2=overall_adjusted_r2,  # 新增
+                overall_tmape=overall_tmape,
+                overall_error=overall_error,
+                overall_channel_mae=overall_channel_mae,
+                overall_channel_mse=overall_channel_mse)
+        
+        # 绘制预测结果散点图
+        self.plot_predictions(all_outputs, all_targets)
+        
+        # 绘制误差指标直方图
+        self.plot_error_histogram(all_outputs, all_targets)
+        
+        return all_outputs, all_targets
+    def test_fft(self, testloader):
+        """在测试集上评估FFT性能，包括选择的误差指标和TMAPE，并打印3组输入、GT和FFT输出"""
+        self.model.eval()  # 虽然不使用模型，但保留以保持结构一致
+        test_loss, test_mae, test_mse, test_r2, test_adjusted_r2 = 0.0, 0.0, 0.0, 0.0, 0.0
+        test_channel_mae = [0.0, 0.0, 0.0, 0.0]
+        test_channel_mse = [0.0, 0.0, 0.0, 0.0]
+        test_channel_error = [0.0, 0.0, 0.0, 0.0]  # 改为通用误差指标
+        test_tmape = 0.0  # 整体TMAPE
+        test_batches = 0
+        
+        all_outputs = []
+        all_targets = []
+        
+        test_pbar = tqdm(testloader, desc='Testing FFT')
+        
+        with torch.no_grad():
+            # 处理 test_output_scale：转换NumPy数组为张量并移动到设备
+            test_output_scale = self.test_output_scale if self.test_output_scale is not None else 1.0
+            if isinstance(test_output_scale, np.ndarray):  # 检查是否为NumPy数组
+                test_output_scale = torch.from_numpy(test_output_scale).to(self.device)
+            else:
+                test_output_scale = torch.tensor(test_output_scale, device=self.device)  # 标量直接转换为张量
+            
+            # 处理 test_input_scale（同样逻辑）
+            test_input_scale = self.test_input_scale if self.test_input_scale is not None else 1.0
+            if isinstance(test_input_scale, np.ndarray):
+                test_input_scale = torch.from_numpy(test_input_scale).to(self.device)
+            else:
+                test_input_scale = torch.tensor(test_input_scale, device=self.device)
+            
+            for batch_idx, (signals, targets, _) in enumerate(test_pbar):
+                # 将数据移动到设备
+                signals = signals.to(self.device)
+                targets = targets.to(self.device)
+
+                # 使用FFT替代模型进行谐波幅度估计
+                batch_size, signal_length = signals.shape
+                outputs = torch.zeros(batch_size, 4, device=self.device)  # 4个谐波分量
+                
+                # 逆归一化信号
+                signals_original = signals * test_input_scale
+                
+                for i in range(batch_size):
+                    signal = signals_original[i].cpu().numpy()
+                    
+                    # 执行FFT
+                    fft_result = np.fft.fft(signal)
+                    fft_magnitude = np.abs(fft_result) / (signal_length / 2)  # 计算幅度
+                    
+                    # 计算频率分辨率
+                    sampling_rate = 3840  # Hz
+                    freq_resolution = sampling_rate / signal_length
+                    
+                    # 找到基波和各次谐波对应的频率索引
+                    fundamental_freq = 60  # Hz
+                    harmonic_freqs = [fundamental_freq, 3*fundamental_freq, 
+                                    5*fundamental_freq, 7*fundamental_freq]
+                    
+                    for j, freq in enumerate(harmonic_freqs):
+                        # 计算对应的频率索引
+                        idx = int(round(freq / freq_resolution))
+                        if idx < len(fft_magnitude):
+                            outputs[i, j] = fft_magnitude[idx]
+                        else:
+                            outputs[i, j] = 0.0  # 如果频率超出范围，设为0
+                
+                # 注意：FFT输出已经是实际幅度，不需要再乘以test_output_scale
+                # 但目标值需要缩放
+                targets = targets * test_output_scale
+
                 # 计算损失
                 loss = self.criterion(outputs, targets)
                 
@@ -610,7 +808,7 @@ class TrainerQLSTMHarmonic:
         
         # 打印测试结果
         error_metric_name = "PE" if self.error_metric == "pe" else "sMAPE"
-        print(f'\nTest Summary:')
+        print(f'\nFFT Test Summary:')
         print(f'Average Loss: {avg_loss:.6f}, MSE: {avg_mse:.6f}, MAE: {avg_mae:.6f}, R²: {avg_r2:.4f}, Adj R²: {avg_adjusted_r2:.4f}')
         print(f'Average TMAPE: {avg_tmape:.2f}%')
         print(f'Overall - MSE: {overall_mse:.6f}, MAE: {overall_mae:.6f}, R²: {overall_r2:.4f}, Adj R²: {overall_adjusted_r2:.4f}, TMAPE: {overall_tmape:.2f}%')
@@ -622,14 +820,14 @@ class TrainerQLSTMHarmonic:
             print(f'  Overall - MSE: {overall_channel_mse[i]:.6f}, MAE: {overall_channel_mae[i]:.6f}, {error_metric_name}: {overall_error[i]:.2f}%')
         
         # 保存测试结果
-        np.savez(os.path.join(self.model_folder, 'test_results.npz'),
+        np.savez(os.path.join(self.model_folder, 'fft_test_results.npz'),
                 outputs=all_outputs,
                 targets=all_targets,
                 avg_loss=avg_loss,
                 avg_mse=avg_mse,
                 avg_mae=avg_mae,
                 avg_r2=avg_r2,
-                avg_adjusted_r2=avg_adjusted_r2,  # 新增
+                avg_adjusted_r2=avg_adjusted_r2,
                 avg_tmape=avg_tmape,
                 avg_channel_mae=avg_channel_mae,
                 avg_channel_mse=avg_channel_mse,
@@ -637,7 +835,7 @@ class TrainerQLSTMHarmonic:
                 overall_mse=overall_mse,
                 overall_mae=overall_mae,
                 overall_r2=overall_r2,
-                overall_adjusted_r2=overall_adjusted_r2,  # 新增
+                overall_adjusted_r2=overall_adjusted_r2,
                 overall_tmape=overall_tmape,
                 overall_error=overall_error,
                 overall_channel_mae=overall_channel_mae,
@@ -650,6 +848,7 @@ class TrainerQLSTMHarmonic:
         self.plot_error_histogram(all_outputs, all_targets)
         
         return all_outputs, all_targets
+    
 
     def plot_predictions(self, outputs, targets):
         """绘制预测值与真实值的散点图"""

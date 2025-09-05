@@ -37,14 +37,14 @@ class CNNLSTM_f32(nn.Module):
 
         self.cnn = nn.Sequential(
             nn.Conv1d(1, cnn_channels, kernel_size, padding=kernel_size//2),
-            nn.LeakyReLU(negative_slope=0.01),
+            nn.ReLU(),
             nn.BatchNorm1d(cnn_channels),
             nn.Dropout(dropout),
             nn.Conv1d(cnn_channels, cnn_channels*2, kernel_size, padding=kernel_size//2),
-            nn.LeakyReLU(negative_slope=0.01),
+            nn.ReLU(),
             nn.BatchNorm1d(cnn_channels*2),
             nn.Dropout(dropout),
-            nn.AdaptiveAvgPool1d(16)  
+            nn.MaxPool1d(kernel_size=2, stride=2)
         )
         
  
@@ -63,13 +63,13 @@ class CNNLSTM_f32(nn.Module):
             layers = []
 
             layers.append(nn.Linear(lstm_hidden_size, mlp_hidden_size))
-            layers.append(nn.LeakyReLU(negative_slope=0.01))
+            layers.append(nn.ReLU())
             layers.append(nn.BatchNorm1d(mlp_hidden_size))
             layers.append(nn.Dropout(dropout))
             
             for _ in range(mlp_num_layers - 1):
                 layers.append(nn.Linear(mlp_hidden_size, mlp_hidden_size))
-                layers.append(nn.LeakyReLU(negative_slope=0.01))
+                layers.append(nn.ReLU())
                 layers.append(nn.BatchNorm1d(mlp_hidden_size))
                 layers.append(nn.Dropout(dropout))
             
@@ -82,7 +82,7 @@ class CNNLSTM_f32(nn.Module):
     def init_weights(self):
         for layer in self.cnn:
             if isinstance(layer, nn.Conv1d):
-                nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                nn.init.kaiming_uniform_(layer.weight, nonlinearity='relu', a=0.01)
                 if layer.bias is not None:
                     nn.init.constant_(layer.bias, 0.1)
         
@@ -95,7 +95,7 @@ class CNNLSTM_f32(nn.Module):
         for head in self.mlp_heads:
             for layer in head:
                 if isinstance(layer, nn.Linear):
-                    nn.init.kaiming_uniform_(layer.weight, nonlinearity='leaky_relu', a=0.01)
+                    nn.init.kaiming_uniform_(layer.weight, nonlinearity='relu', a=0.01)
                     if layer.bias is not None:
                         if layer == head[-1]: 
                             nn.init.constant_(layer.bias, 0.0)
