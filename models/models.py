@@ -105,13 +105,14 @@ class CNNLSTM_f32(nn.Module):
     def forward(self, x):
         if x.dim() == 2:
             x = x.unsqueeze(1) 
-        
+        #print(f"F uns output: {x.size()}")
         cnn_out = self.cnn(x)
         cnn_out = cnn_out.permute(0, 2, 1)
+        #print(f"F CNN output: {cnn_out.size()}")
         
         lstm_out, _ = self.lstm(cnn_out)
         lstm_out = lstm_out[:, -1, :]
-
+        #print(f"F LSTM output: {lstm_out.size()}")
         outputs = []
         for head in self.mlp_heads:
             outputs.append(head(lstm_out))

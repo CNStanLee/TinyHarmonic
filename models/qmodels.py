@@ -17,12 +17,13 @@ import torch.nn.functional as F
 import brevitas.nn as qnn
 from brevitas.quant import Int8ActPerTensorFloat, Uint8ActPerTensorFloat
 
+# 假设这些量化位宽已在代码其他部分定义
 cnn_weight_bit_width = 8
+cnn_activation_bit_width = 8
 lstm_weight_bit_width = 8
+lstm_activation_bit_width = 8
 linear_weight_bit_width = 8
-cnn_activation_bit_width = 6
-lstm_activation_bit_width = 6
-linear_activation_bit_width = 6
+linear_activation_bit_width = 8
 
 class QCNNLSTM(nn.Module):
     def __init__(self, input_size=32, cnn_channels=64, kernel_size=3, 
@@ -34,6 +35,9 @@ class QCNNLSTM(nn.Module):
         self.lstm_num_layers = lstm_num_layers
         self.lstm_hidden_size = lstm_hidden_size
 
+        # 添加8bit量化输入层
+        self.input_quant = qnn.QuantIdentity(bit_width=8)
+        
         self.qcnn = nn.Sequential(
             qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=kernel_size//2,
                             weight_bit_width=cnn_weight_bit_width),
@@ -62,8 +66,7 @@ class QCNNLSTM(nn.Module):
 
             layers.append(qnn.QuantLinear(lstm_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
             layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
-            print(f"MLP first layer input size: {lstm_hidden_size}, output size: {mlp_hidden_size}")
-            layers.append(nn.BatchNorm1d(mlp_hidden_size)) # this BN got a size problem ?? why this use size of the quanlinear input?
+            layers.append(nn.BatchNorm1d(mlp_hidden_size))
             layers.append(nn.Dropout(dropout))
             
             for _ in range(mlp_num_layers - 1):
@@ -77,7 +80,12 @@ class QCNNLSTM(nn.Module):
             self.qmlp_heads.append(nn.Sequential(*layers))
         
     def forward(self, x):
-        x = x.view(-1, 1, self.input_size)  # **Reshape input to (batch_size, 1, input_size)
+        if x.dim() == 2:
+            x = x.unsqueeze(1)  # **Reshape input to (batch_size, 1, input_size)
+        
+        # 应用输入量化
+        x = self.input_quant(x)
+        
         batch_size = x.size(0)
         h0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
         c0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
@@ -85,14 +93,12 @@ class QCNNLSTM(nn.Module):
         qcnn_out = self.qcnn(x)
         qcnn_out = qcnn_out.permute(0, 2, 1)  # (batch_size, seq_len, features)
         qlstmout, (hn, cn) = self.qlstm(qcnn_out, (h0.detach(), c0.detach()))
-        # here can add a relu, but we skip it for now
         qlstmout = hn[-1, :, :]  # (batch_size, lstm_hidden_size)
-        print(f"QLSTM output shape: {qlstmout.size()}")
-
+        qlstmout = qlstmout.view(batch_size, -1)
         outputs = []
         for head in self.qmlp_heads:
             out = head(qlstmout)
             outputs.append(out)
         out = torch.cat(outputs, dim=1)  # (batch_size, num_heads)
-        print(f"Final output shape: {out.size()}")
+
         return out
