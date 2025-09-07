@@ -1,0 +1,206 @@
+/qlstm/layers.0.0/input_weight/weight_quant/export_handler_2/Constant_output_0
+Shape: ()
+Values:
+0.0032420847564935684
+, index=20
+scale_o
+-------------------------
+/qlstm/layers.0.0/input_weight/weight_quant/export_handler_3/Constant_output_0
+Shape: ()
+Values:
+0.0033369967713952065
+, index=21
+scale_f
+-------------------------
+/qlstm/layers.0.0/input_weight/weight_quant/export_handler/Constant_output_0
+Shape: ()
+Values:
+0.0026871049776673317
+, index=16
+scale_i
+-------------------------
+/qlstm/layers.0.0/input_weight/weight_quant/export_handler_1/Constant_output_0
+Shape: ()
+Values:
+0.004945587832480669
+, index=19
+scale_c
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_2_output_0
+Shape: ()
+Values:
+0.06339830160140991
+, index=25
+scale_1
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_10_output_0
+Shape: ()
+Values:
+0.014122666791081429
+, index=33
+scale_2
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_3_output_0
+Shape: ()
+Values:
+0.08846518397331238
+, index=26
+scale_3
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_8_output_0
+Shape: ()
+Values:
+0.014795037917792797
+, index=31
+scale_4
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_4_output_0
+Shape: ()
+Values:
+0.03166016563773155
+, index=27
+scale_5
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_9_output_0
+Shape: ()
+Values:
+0.023927057161927223
+, index=32
+scale_6
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_5_output_0
+Shape: ()
+Values:
+0.0697396919131279
+, index=28
+scale_7
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_6_output_0
+Shape: ()
+Values:
+0.013812770135700703
+, index=29
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_output_0
+Shape: ()
+Values:
+0.045602329075336456
+, index=23
+-------------------------
+/qlstm/layers.0.0/export_handler/Constant_11_output_0
+Shape: ()
+Values:
+0.028057008981704712
+, index=34
+-------------------------
+/qlstm/layers.0.0/output_quant/export_handler/Constant_output_0
+Shape: ()
+Values:
+0.016641920432448387
+, index=13
+-------------------------
+
+
+
+
+
+
+
+
+
+
+
+-------------------------
+/Constant_output_0
+Shape: (1, 128, 128)
+Values:
+[[[0. 0. 0. ... 0. 0. 0.]
+  [0. 0. 0. ... 0. 0. 0.]
+  [0. 0. 0. ... 0. 0. 0.]
+  ...
+  [0. 0. 0. ... 0. 0. 0.]
+  [0. 0. 0. ... 0. 0. 0.]
+  [0. 0. 0. ... 0. 0. 0.]]]
+, index=12
+-------------------------
+
+/qlstm/layers.0.0/output_quant/export_handler/Constant_1_output_0
+Shape: ()
+Values:
+0
+, index=14
+-------------------------
+/qlstm/layers.0.0/output_quant/export_handler/Constant_2_output_0
+Shape: ()
+Values:
+8.0
+, index=15
+-------------------------
+
+/qlstm/layers.0.0/input_weight/weight_quant/export_handler/Constant_1_output_0
+Shape: ()
+Values:
+-127
+, index=17
+-------------------------
+/qlstm/layers.0.0/input_weight/weight_quant/export_handler/Constant_2_output_0
+Shape: ()
+Values:
+127
+, index=18
+-------------------------
+
+
+
+onnx.brevitas::QuantLSTMCell_120
+Shape: (128, 128)
+Values:
+[[0. 0. 0. ... 0. 0. 0.]
+ [0. 0. 0. ... 0. 0. 0.]
+ [0. 0. 0. ... 0. 0. 0.]
+ ...
+ [0. 0. 0. ... 0. 0. 0.]
+ [0. 0. 0. ... 0. 0. 0.]
+ [0. 0. 0. ... 0. 0. 0.]]
+, index=22
+-------------------------
+
+/qlstm/layers.0.0/export_handler/Constant_1_output_0
+Shape: ()
+Values:
+6.0
+, index=24
+-------------------------
+
+
+
+
+
+/qlstm/layers.0.0/export_handler/Constant_7_output_0
+Shape: ()
+Values:
+0
+, index=30
+-------------------------
+
+
+
+/qlstm/layers.0.0/Constant_output_0
+Shape: (1,)
+Values:
+[0]
+, index=35
+-------------------------
+/Constant_1_output_0
+Shape: ()
+Values:
+-1
+, index=36
+-------------------------
+/Constant_2_output_0
+Shape: (2,)
+Values:
+[128  -1]
+, index=37
+-------------------------
+Weights extraction completed.

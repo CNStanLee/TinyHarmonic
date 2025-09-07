@@ -184,7 +184,11 @@ def main():
     
     # start QAT
     #export env : BREVITAS_JIT=1
+#     (py310) changhong@changhong-Alienware-m16-R2:~/prj/finn_dev/finn$ export BREVITAS_JIT=1
+# (   (py310) changhong@changhong-Alienware-m16-R2:~/prj/finn_dev/finn$ export -p
     os.environ["BREVITAS_JIT"] = "1"
+
+    #
     QAT(qmodel_name, qmodel_def, fmodel_pt_path)
 
 if __name__ == "__main__":
