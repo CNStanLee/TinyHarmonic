@@ -1,41 +1,19 @@
-import onnx
 import numpy as np
-from qonnx.util.basic import qonnx_make_model
-from finn.util.visualization import showInNetron,showSrc
+import torch
+# --------------------------------------------------------
 import onnxruntime as rt
-from qonnx.util.basic import qonnx_make_model
+import onnx
 from onnx.helper import make_tensor_value_info, make_node, make_graph, make_model, make_tensor
 from onnx import numpy_helper
-from qonnx.core.modelwrapper import ModelWrapper
-from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
-from qonnx.transformation.infer_shapes import InferShapes
-import finn.core.onnx_exec as oxe
-import torch
+# --------------------------------------------------------
 from brevitas.nn import QuantReLU, QuantIdentity
+# --------------------------------------------------------
+from finn.util.visualization import showInNetron,showSrc
 from finn.transformation.streamline import Streamline
 from finn.transformation.streamline.reorder import MoveScalarLinearPastInvariants
 import finn.transformation.streamline.absorb as absorb
 from finn.transformation.streamline import RoundAndClipThresholds
-from qonnx.core.datatype import DataType
-from qonnx.transformation.qcdq_to_qonnx import QCDQToQuant
 import finn.core.onnx_exec as oxe
-
-from qonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNodeNames, RemoveStaticGraphInputs
-from qonnx.transformation.infer_shapes import InferShapes
-from qonnx.transformation.infer_datatypes import InferDataTypes
-from qonnx.transformation.fold_constants import FoldConstants
-
-from qonnx.transformation.base import Transformation
-from qonnx.transformation.batchnorm_to_affine import BatchNormToAffine
-from qonnx.transformation.general import (
-    ConvertDivToMul,
-    ConvertSubToAdd,
-    GiveReadableTensorNames,
-    GiveUniqueNodeNames,
-)
-from qonnx.transformation.infer_datatypes import InferDataTypes
-from qonnx.transformation.remove import RemoveIdentityOps
-
 from finn.transformation.streamline.absorb import (
     Absorb1BitMulIntoConv,
     Absorb1BitMulIntoMatMul,
@@ -64,148 +42,263 @@ from finn.transformation.streamline.reorder import (
 )
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.transformation.streamline.sign_to_thres import ConvertSignToThres
-
+from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
+# --------------------------------------------------------
+from qonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNodeNames, RemoveStaticGraphInputs
+from qonnx.transformation.infer_shapes import InferShapes
+from qonnx.transformation.infer_datatypes import InferDataTypes
+from qonnx.transformation.fold_constants import FoldConstants
+from qonnx.transformation.base import Transformation
+from qonnx.transformation.batchnorm_to_affine import BatchNormToAffine
+from qonnx.core.datatype import DataType
+from qonnx.transformation.qcdq_to_qonnx import QCDQToQuant
+from qonnx.util.basic import qonnx_make_model
+from qonnx.transformation.general import (
+    ConvertDivToMul,
+    ConvertSubToAdd,
+    GiveReadableTensorNames,
+    GiveUniqueNodeNames,
+)
+from qonnx.transformation.infer_datatypes import InferDataTypes
+from qonnx.transformation.remove import RemoveIdentityOps
+from qonnx.core.modelwrapper import ModelWrapper
+from qonnx.util.basic import qonnx_make_model
+# --------------------------------------------------------
+from models.qmodels import QCNNLSTM, QCNNLSTM_subCNN, QCNNLSTM_subLSTM, QCNNLSTM_subMLP
 # --------------------------------------------------------
 # set random seed
 np.random.seed(1998)
 torch.manual_seed(1998)
-
 # --------------------------------------------------------
-model_brevitas_path = "models/ids/ids_brevitas.onnx"
-model_qcdq_path = "models/ids/ids_qcdq.onnx"
-model_qonnx_quant_threshhold_transform_path = "models/ids/ids_qonnx_quant_threshold_transform.onnx"
-model_quant_threshold_finn_path = "models/ids/ids_quant_threshold_finn.onnx"
-model_finn_tidy_up_path = "models/ids/ids_finn_tidy_up.onnx"
-def ids_flow():
-    # --------------------------------------------------------
-    # qcdq to qonnx
-    # --------------------------------------------------------
+input_cycle_fraction = 0.5
+model_name = f"cnn_lstm_real_c{input_cycle_fraction}"
+fmodel_name= f"f{model_name}"
+qmodel_name= f"q{model_name}"
+input_size = int(input_cycle_fraction * 64)
+qlstm_input_size = input_size * 2
+hidden_size = 128
+# --------------------------------------------------------
+qmodel_pth_path = f"./models/{qmodel_name}/final_model.pth"
+model_brevitas_path = f"./models/{qmodel_name}/sublstm.onnx"
+model_qcdq_path = f"./models/{qmodel_name}/sublstm_qcdq.onnx"
+model_qonnx_path = f"./models/{qmodel_name}/sublstm_qonnx.onnx"
+model_finn_path = f"./models/{qmodel_name}/sublstm_finn.onnx"
+model_finn_tidy_up_path = f"./models/{qmodel_name}/sublstm_finn_tidy_up.onnx"
+model_finn_streamlined_path = f"./models/{qmodel_name}/sublstm_finn_streamlined.onnx"
+# --------------------------------------------------------
+input_cycle_fraction = 0.5
+input_size = int(input_cycle_fraction * 64)
+cnn_channels= input_size
+kernel_size=3
+lstm_hidden_size=128 # was 128
+lstm_num_layers=1
+mlp_hidden_size=512 # was 256 broader is much better
+mlp_num_layers=1 # was 3
+dropout=0.2
+num_heads=4
+sublstm_def = QCNNLSTM_subLSTM(
+                 input_size=input_size, 
+                 cnn_channels=cnn_channels, 
+                 kernel_size=kernel_size, 
+                 lstm_hidden_size=lstm_hidden_size, 
+                 lstm_num_layers=lstm_num_layers, 
+                 mlp_hidden_size=mlp_hidden_size, 
+                 mlp_num_layers=mlp_num_layers, 
+                 dropout=dropout, 
+                 num_heads=num_heads
+                    )
+# --------------------------------------------------------
+x = np.random.randn(qlstm_input_size,1).astype(np.float32).reshape([qlstm_input_size,1])
+batch_size = 1
+h0 = np.zeros((hidden_size, batch_size), dtype=np.float32)
+c0 = np.zeros((hidden_size, batch_size), dtype=np.float32)
 
-    print("Load the ONNX model")
+input_dict = {}
+input_dict["X"] = x
+input_dict["h_t-1"] = h0
+input_dict["c_t-1"] = c0
+
+def convert_qcdq_to_qonnx(model_qcdq_path, model_qonnx_path):
+    print("step 1: qcdq to qonnx_tmp1")
     model_qcdq = ModelWrapper(model_qcdq_path)
-    model_qonnx_quant_threshhold_transform = model_qcdq.transform(QCDQToQuant())
-    model_qonnx_quant_threshhold_transform = model_qonnx_quant_threshhold_transform.transform(InferShapes())
-    model_qonnx_quant_threshhold_transform.save(model_qonnx_quant_threshhold_transform_path)
+    model_qonnx = model_qcdq.transform(QCDQToQuant())
+    model_qonnx = model_qonnx.transform(InferShapes())
+    model_qonnx.save(model_qonnx_path)
+    print("qonnx model saved to ", model_qonnx_path)
+    return model_qonnx
 
-    # --------------------------------------------------------
-    # qonnx behavior test
-    # --------------------------------------------------------
+def brevitas_behavior_test(qmodel, qmodel_pth_path):
+    qmodel.load_state_dict(torch.load(qmodel_pth_path))
+    qmodel.eval()
+    with torch.no_grad():
+        print(x.shape)
+        x_torch = torch.from_numpy(x).permute(1,0).unsqueeze(0)
+        print(x_torch.shape)
+        with torch.no_grad():
+            out_torch = qmodel.forward(x_torch).numpy()
+            print("Brevitas output shape:", out_torch.shape)
+    return out_torch
 
-    in_X = np.ones([10,1],dtype=np.float32).reshape([10,1])
-    in_X[0][0] = 0
-    in_X[1][0] = 1
-    in_X[2][0] = 2
-    in_X[3][0] = 3
-    in_X[4][0] = 4
-    in_X[5][0] = 5
-    in_X[6][0] = 6
-    in_X[7][0] = 7
-    in_X[8][0] = 8
-    in_X[9][0] = 9
+def qonnx_behavior_test(model_qonnx_tmp1):
+    output_dict_qonnx = oxe.execute_onnx(model_qonnx_tmp1, input_dict,return_full_exec_context=True)
+    QONNX_out = np.array(output_dict_qonnx.get("dql_hidden_out"))
+    QONNX_out = QONNX_out.transpose(1,0)
+    print("QONNX output shape:", QONNX_out.shape)
+    return QONNX_out
 
-    in_h_t_1 = np.ones([20,1],dtype=np.float32).reshape([20,1])
-    in_c_t_1 = np.ones([20,1],dtype=np.float32).reshape([20,1])
-    in_h_t_1[0][0] = 15
-    in_c_t_1[0][0] = 12
+def convert_qonnx_to_finn(model_qonnx_tmp1, model_finn_path):
+    model_finn = model_qonnx_tmp1.transform(ConvertQONNXtoFINN())
+    model_finn.save(model_finn_path)
+    print("finn model saved to ", model_finn_path)
+    return model_finn
 
-    input_dict = {}
-    input_dict["X"] = in_X
-    input_dict["h_t-1"] = in_h_t_1
-    input_dict["c_t-1"] = in_c_t_1
-
-    output_dict_qonnx = oxe.execute_onnx(model_qonnx_quant_threshhold_transform, input_dict,return_full_exec_context=True)
-    # QONNX_out = np.array(output_dict_qonnx.get("dql_hidden_out"))
-    # print(QONNX_out)
-
-    # --------------------------------------------------------
-    # convert to finn
-    # --------------------------------------------------------
-
-    model_finn = model_qonnx_quant_threshhold_transform.transform(ConvertQONNXtoFINN())
-    model_finn.save(model_quant_threshold_finn_path)
-    # !Attention, here the bias of tanh and sigmoid is not given, and the range of threshholding is hard-coded
-    # need to fig this out in qonnx_activation_handlers.py
-
-    # --------------------------------------------------------
-    # behavior test
-    # --------------------------------------------------------
+def finn_behavior_test(model_finn):
     output_dict_finn = oxe.execute_onnx(model_finn, input_dict,return_full_exec_context=True)#return_full_exec_context=True
-    qonnx_output = np.array(output_dict_qonnx.get("dql_hidden_out")) #i_t_dql1
-    #print(qonnx_output)
     finn_onnx_output = np.array(output_dict_finn.get("dql_hidden_out")) #i_t_dql1
-    #print(finn_onnx_output)
-    print(qonnx_output - finn_onnx_output)
-    # behavior_test not passed yet, need to check the thresholding function again
+    finn_onnx_output = finn_onnx_output.transpose(1,0)
+    print("FINN output shape:", finn_onnx_output.shape)
+    return finn_onnx_output
 
-    # --------------------------------------------------------
-    # transformation
-    # --------------------------------------------------------
-    # model_finn = model_finn.transform(InferShapes())
-    # model_finn = model_finn.transform(FoldConstants())
-    # model_finn = model_finn.transform(GiveUniqueNodeNames())
-    # model_finn = model_finn.transform(GiveReadableTensorNames())
-    # model_finn = model_finn.transform(InferDataTypes())
-    # model_finn = model_finn.transform(RemoveStaticGraphInputs())
-    # model_finn.save(model_finn_tidy_up_path)
+def finn_tidyup(model_finn, model_finn_tidy_up_path):
+    tidy_finn = model_finn.transform(InferShapes())
+    tidy_finn = tidy_finn.transform(FoldConstants())
+    tidy_finn = tidy_finn.transform(GiveUniqueNodeNames())
+    tidy_finn = tidy_finn.transform(GiveReadableTensorNames())
+    tidy_finn = tidy_finn.transform(InferDataTypes())
+    tidy_finn = tidy_finn.transform(RemoveStaticGraphInputs())
+    tidy_finn.save(model_finn_tidy_up_path)
+    return tidy_finn
 
-    # --------------------------------------------------------
-    # behavior test
-    # --------------------------------------------------------
-    # input_dict = {}
-    # input_dict["global_in_2"] = in_X
-    # input_dict["global_in"] = in_h_t_1
-    # input_dict["global_in_1"] = in_c_t_1
-
-    # output_dict_finn_tidy = oxe.execute_onnx(model_finn, input_dict,return_full_exec_context=True) 
-    # x = np.array(output_dict_finn.get("dql_hidden_out")) #i_t_dql1
-    # print(x)
-    # x1 = np.array(output_dict_finn_tidy) #i_t_dql1
-    # print(x1)
-    # --------------------------------------------------------
-    # transformation 2
-    # --------------------------------------------------------
-    # streamline_transformations = [
-    #         ConvertSubToAdd(),
-    #         ConvertDivToMul(),     
-    #         BatchNormToAffine(), 
-    #         ConvertSignToThres(),  
-    #         MoveMulPastMaxPool(),
-    #         MoveScalarLinearPastInvariants(),  
-    #         AbsorbSignBiasIntoMultiThreshold(),
-    #         MoveAddPastMul(),     
-    #         MoveScalarAddPastMatMul(), 
-    #         MoveAddPastConv(),       
-    #         MoveScalarMulPastConv(), 
-    #         MoveAddPastMul(), 
-    #         CollapseRepeatedAdd(),
-    #         CollapseRepeatedMul(),   
-    #         MoveMulPastMaxPool(),  
-    #         AbsorbAddIntoMultiThreshold(), 
-    #         FactorOutMulSignMagnitude(), 
-    #         AbsorbMulIntoMultiThreshold(), #This transformation absorbs the Scalar Mul nodes into the next Multithreshold nodes.
-    #         MoveLinearPastEltwiseAdd(), #This transformation helps us get all the scalar mul nodes past the elstwiseadd. 
-    #         MoveLinearPastEltwiseMul(),#This transformation helps us get scalar mul's past eltwisemuls. We can then absorb them into the multithrehsold opertion and remove them from the graph entirely.
-    #         AbsorbMulIntoMultiThreshold(), #The scalar mul nodes passed in the previous step are now merged into the multithreshold node.
-    #         RoundAndClipThresholds(),
-    #         MoveScalarMulPastMatMul(), #To move activation scales im the dense part beyond dense layers.
-    #         AbsorbMulIntoMultiThreshold(),
-    #         MoveLinearPastEltwiseAdd(),
-    #         AbsorbMulIntoMultiThreshold(), #For the last Multithreshold node in the graph
-    #         RoundAndClipThresholds(),
-    #         CollapseRepeatedMul(),
-    #     ]
-    # i = 0
-    # for trn in streamline_transformations:
-    #     print('Transformation = ',trn)
-    #     model_finn = model_finn.transform(trn)
-    #     model_finn = model_finn.transform(RemoveIdentityOps())
-    #     model_finn = model_finn.transform(GiveUniqueNodeNames())
-    #     model_finn = model_finn.transform(GiveReadableTensorNames())
-    #     model_finn = model_finn.transform(InferDataTypes())
-    #     model_finn.save('streamline_'+str(i)+'.onnx')
-    #     i = i+1
-
-
+def finn_streamlining(model_finn, model_finn_streamlined_path):
+    streamline_transformations = [
+            ConvertSubToAdd(),
+            ConvertDivToMul(),     
+            BatchNormToAffine(), 
+            ConvertSignToThres(),  
+            MoveMulPastMaxPool(),
+            MoveScalarLinearPastInvariants(),  
+            AbsorbSignBiasIntoMultiThreshold(),
+            MoveAddPastMul(),     
+            MoveScalarAddPastMatMul(), 
+            MoveAddPastConv(),       
+            MoveScalarMulPastConv(), 
+            MoveAddPastMul(), 
+            CollapseRepeatedAdd(),
+            CollapseRepeatedMul(),   
+            MoveMulPastMaxPool(),  
+            AbsorbAddIntoMultiThreshold(), 
+            FactorOutMulSignMagnitude(), 
+            AbsorbMulIntoMultiThreshold(), #This transformation absorbs the Scalar Mul nodes into the next Multithreshold nodes.
+            MoveLinearPastEltwiseAdd(), #This transformation helps us get all the scalar mul nodes past the elstwiseadd. 
+            MoveLinearPastEltwiseMul(),#This transformation helps us get scalar mul's past eltwisemuls. We can then absorb them into the multithrehsold opertion and remove them from the graph entirely.
+            AbsorbMulIntoMultiThreshold(), #The scalar mul nodes passed in the previous step are now merged into the multithreshold node.
+            RoundAndClipThresholds(),
+            MoveScalarMulPastMatMul(), #To move activation scales im the dense part beyond dense layers.
+            AbsorbMulIntoMultiThreshold(),
+            MoveLinearPastEltwiseAdd(),
+            AbsorbMulIntoMultiThreshold(), #For the last Multithreshold node in the graph
+            RoundAndClipThresholds(),
+            CollapseRepeatedMul(),
+        ]
+    i = 0
+    for trn in streamline_transformations:
+        print('Transformation = ',trn)
+        model_finn = model_finn.transform(trn)
+        model_finn = model_finn.transform(RemoveIdentityOps())
+        model_finn = model_finn.transform(GiveUniqueNodeNames())
+        model_finn = model_finn.transform(GiveReadableTensorNames())
+        model_finn = model_finn.transform(InferDataTypes())
+        model_finn.save(f"./models/{qmodel_name}/sublstm_finn_streamlined{i}.onnx")
+        i = i+1
+    model_finn.save(model_finn_streamlined_path)
 
 if __name__ == "__main__":
-    ids_flow()
+    # brevitas model
+    brevitas_behaviour = brevitas_behavior_test(sublstm_def, qmodel_pth_path)
+    # qcdq -> qonnx
+    model_qonnx = convert_qcdq_to_qonnx(model_qcdq_path, model_qonnx_path)
+    # behavior test: qcdq vs qonnx
+    qonnx_behaviour = qonnx_behavior_test(model_qonnx)
+    mse_brevitas_qonnx = np.mean((brevitas_behaviour - qonnx_behaviour) ** 2)
+    print(f'MSE(Brevitas model and QONNX model): {mse_brevitas_qonnx}')
+    # qonnx -> finn
+    model_finn = convert_qonnx_to_finn(model_qonnx, model_finn_path)
+    finn_onnx_behaviour = finn_behavior_test(model_finn)
+    mse_qonnx_finn = np.mean((qonnx_behaviour - finn_onnx_behaviour) ** 2)
+    print(f'MSE(QONNX model and FINN model): {mse_qonnx_finn}')
+    print("qonnx behaviour:")
+    print(qonnx_behaviour)
+    print("finn behaviour:")
+    print(finn_onnx_behaviour)
+    tidy_finn = finn_tidyup(model_finn, model_finn_tidy_up_path)
+    finn_streamlining = finn_streamlining(tidy_finn, model_finn_streamlined_path)
+
+
+
+    # # --------------------------------------------------------
+    # # transformation
+    # # --------------------------------------------------------
+    # # model_finn = model_finn.transform(InferShapes())
+    # # model_finn = model_finn.transform(FoldConstants())
+    # # model_finn = model_finn.transform(GiveUniqueNodeNames())
+    # # model_finn = model_finn.transform(GiveReadableTensorNames())
+    # # model_finn = model_finn.transform(InferDataTypes())
+    # # model_finn = model_finn.transform(RemoveStaticGraphInputs())
+    # # model_finn.save(model_finn_tidy_up_path)
+
+    # # --------------------------------------------------------
+    # # behavior test
+    # # --------------------------------------------------------
+    # # input_dict = {}
+    # # input_dict["global_in_2"] = in_X
+    # # input_dict["global_in"] = in_h_t_1
+    # # input_dict["global_in_1"] = in_c_t_1
+
+    # # output_dict_finn_tidy = oxe.execute_onnx(model_finn, input_dict,return_full_exec_context=True) 
+    # # x = np.array(output_dict_finn.get("dql_hidden_out")) #i_t_dql1
+    # # print(x)
+    # # x1 = np.array(output_dict_finn_tidy) #i_t_dql1
+    # # print(x1)
+    # # --------------------------------------------------------
+    # # transformation 2
+    # # --------------------------------------------------------
+    # # streamline_transformations = [
+    # #         ConvertSubToAdd(),
+    # #         ConvertDivToMul(),     
+    # #         BatchNormToAffine(), 
+    # #         ConvertSignToThres(),  
+    # #         MoveMulPastMaxPool(),
+    # #         MoveScalarLinearPastInvariants(),  
+    # #         AbsorbSignBiasIntoMultiThreshold(),
+    # #         MoveAddPastMul(),     
+    # #         MoveScalarAddPastMatMul(), 
+    # #         MoveAddPastConv(),       
+    # #         MoveScalarMulPastConv(), 
+    # #         MoveAddPastMul(), 
+    # #         CollapseRepeatedAdd(),
+    # #         CollapseRepeatedMul(),   
+    # #         MoveMulPastMaxPool(),  
+    # #         AbsorbAddIntoMultiThreshold(), 
+    # #         FactorOutMulSignMagnitude(), 
+    # #         AbsorbMulIntoMultiThreshold(), #This transformation absorbs the Scalar Mul nodes into the next Multithreshold nodes.
+    # #         MoveLinearPastEltwiseAdd(), #This transformation helps us get all the scalar mul nodes past the elstwiseadd. 
+    # #         MoveLinearPastEltwiseMul(),#This transformation helps us get scalar mul's past eltwisemuls. We can then absorb them into the multithrehsold opertion and remove them from the graph entirely.
+    # #         AbsorbMulIntoMultiThreshold(), #The scalar mul nodes passed in the previous step are now merged into the multithreshold node.
+    # #         RoundAndClipThresholds(),
+    # #         MoveScalarMulPastMatMul(), #To move activation scales im the dense part beyond dense layers.
+    # #         AbsorbMulIntoMultiThreshold(),
+    # #         MoveLinearPastEltwiseAdd(),
+    # #         AbsorbMulIntoMultiThreshold(), #For the last Multithreshold node in the graph
+    # #         RoundAndClipThresholds(),
+    # #         CollapseRepeatedMul(),
+    # #     ]
+    # # i = 0
+    # # for trn in streamline_transformations:
+    # #     print('Transformation = ',trn)
+    # #     model_finn = model_finn.transform(trn)
+    # #     model_finn = model_finn.transform(RemoveIdentityOps())
+    # #     model_finn = model_finn.transform(GiveUniqueNodeNames())
+    # #     model_finn = model_finn.transform(GiveReadableTensorNames())
+    # #     model_finn = model_finn.transform(InferDataTypes())
+    # #     model_finn.save('streamline_'+str(i)+'.onnx')
+    # #     i = i+1

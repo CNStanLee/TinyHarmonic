@@ -248,7 +248,7 @@ def lstm_values_def(input_size=32, hidden_size=128):
             make_tensor_value_info("input_dql_hidden_out",onnx.TensorProto.FLOAT, [hidden_size,1]),
             make_tensor_value_info("ql_hidden_out",onnx.TensorProto.INT8, [hidden_size,1]),
             make_tensor_value_info("ql_hidden_out_carry",onnx.TensorProto.INT8, [hidden_size,1]),
-            make_tensor_value_info("dql_hidden_out_carry", onnx.TensorProto.FLOAT, [hidden_size,1]),
+            # make_tensor_value_info("dql_hidden_out_carry", onnx.TensorProto.FLOAT, [hidden_size,1]),
             # make_tensor_value_info("ql_hidden_out_clip",onnx.TensorProto.UINT8, [hidden_size,1]),
             # make_tensor_value_info("dql_hidden_out",onnx.TensorProto.FLOAT, [20,1]),
             make_tensor_value_info("h_t_inter_identity",onnx.TensorProto.FLOAT, [hidden_size,1]),
