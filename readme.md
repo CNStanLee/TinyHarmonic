@@ -21,3 +21,13 @@ pip install brevitas==0.9.1
 - Inputs: quantised_model_weight.pth, model_def
 - Outputs: brevitas_export_model.onnx 
 # step 3
+This step is for qcdq model generation (model description).
+- To make life easier, we split the model to 3 submodels -> 1.1DCNN 2.LSTM 3.4-head MLP
+- Then we hand-craft the LSTM operators and replace its parameters, for part 1 and 3, we consider use standard flow, cuz their ops already supported in this version of FINN.
+- then use 31_onnx_des.py
+- In this script, it will rebuid the lstm model in a qcdq way. (onnx construct -> initializers setup)
+- After we have the qcdq model, then we do behaviour test to ensure our implementation is doing its correct things.
+- Inputs: brevitas_export_model.onnx
+- Outputs: sublstm_qcdq.onnx, subcnn.onnx. submlp.onnx
+# step 4
+This step is for finn model generation (streamlining).
