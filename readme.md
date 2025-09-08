@@ -5,7 +5,7 @@ This step is for model's QAT training.
 - In this step, we use slide windows to split the harmonic current/voltage, then use 12 cycles FFT harmonic estimation as the ground truth (from IEC standards).
 - The task is 0.5cycle input current/voltage -> 1, 3, 5, 7 harmonic amp
 - We can change the cycle from 0 - 4 to have different model and corresponding dataset
-- Model strucute is like 1DCNN->LSTM->4-head MLP regression
+- Model strucute is like 1DCNN->LSTM->4-head broad MLP regression (1DCNN+LSTM for feature extration, broad MLP has been verified fit this regression better.)
 - Inputs: waveform_cycles, model_structure.
 - Outputs: quantised_model_weight.pth, model_def 
 # step 2
@@ -31,3 +31,7 @@ This step is for qcdq model generation (model description).
 - Outputs: sublstm_qcdq.onnx, subcnn.onnx. submlp.onnx
 # step 4
 This step is for finn model generation (streamlining).
+- In this step, all the script should be excuted in the FINN docker.
+- We need to update the activation function and transformation to finn src
+- The thresholding functions (ref/step4/activation.py) shall be updated to : finn/src/finn/transformation/qonnx/qonnx_activation_handlers.py
+- The transformation functions (ref/step4/transformation.py) shall be updated to : finn/src/finn/transformation/streamline
