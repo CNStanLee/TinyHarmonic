@@ -18,12 +18,12 @@ import brevitas.nn as qnn
 from brevitas.quant import Int8ActPerTensorFloat, Uint8ActPerTensorFloat
 
 # 假设这些量化位宽已在代码其他部分定义
-cnn_weight_bit_width = 8
-cnn_activation_bit_width = 8
+cnn_weight_bit_width = 4
+cnn_activation_bit_width = 4
 lstm_weight_bit_width = 8
 lstm_activation_bit_width = 6 # change to 6 need tot retrain the model
-linear_weight_bit_width = 8
-linear_activation_bit_width = 8
+linear_weight_bit_width = 4
+linear_activation_bit_width = 4
 
 class QCNNLSTM(nn.Module):
     def __init__(self, input_size=32, cnn_channels=64, kernel_size=3, 

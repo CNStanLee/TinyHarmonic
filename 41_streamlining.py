@@ -244,9 +244,9 @@ if __name__ == "__main__":
     print(finn_onnx_behaviour)
     tidy_finn = finn_tidyup(model_finn, model_finn_tidy_up_path)
     finn_streamlining = finn_streamlining(tidy_finn, model_finn_streamlined_path)
-    #streamlined_behaviour = finn_streamline_model_behavior_test(finn_streamlining)
-    #mse_finn_streamlined = np.mean((finn_onnx_behaviour - streamlined_behaviour) ** 2)
-    #print(f'MSE(FINN model and streamlined FINN model): {mse_finn_streamlined}')
+    # streamlined_behaviour = finn_streamline_model_behavior_test(finn_streamlining)
+    # mse_finn_streamlined = np.mean((finn_onnx_behaviour - streamlined_behaviour) ** 2)
+    # print(f'MSE(FINN model and streamlined FINN model): {mse_finn_streamlined}')
 
 
     # # --------------------------------------------------------
