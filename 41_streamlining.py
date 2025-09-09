@@ -44,25 +44,25 @@ from finn.transformation.streamline.round_thresholds import RoundAndClipThreshol
 from finn.transformation.streamline.sign_to_thres import ConvertSignToThres
 from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
 # --------------------------------------------------------
-from qonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNodeNames, RemoveStaticGraphInputs
-from qonnx.transformation.infer_shapes import InferShapes
-from qonnx.transformation.infer_datatypes import InferDataTypes
-from qonnx.transformation.fold_constants import FoldConstants
-from qonnx.transformation.base import Transformation
-from qonnx.transformation.batchnorm_to_affine import BatchNormToAffine
-from qonnx.core.datatype import DataType
-from qonnx.transformation.qcdq_to_qonnx import QCDQToQuant
-from qonnx.util.basic import qonnx_make_model
-from qonnx.transformation.general import (
+from mqonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNodeNames, RemoveStaticGraphInputs
+from mqonnx.transformation.infer_shapes import InferShapes
+from mqonnx.transformation.infer_datatypes import InferDataTypes
+from mqonnx.transformation.fold_constants import FoldConstants
+from mqonnx.transformation.base import Transformation
+from mqonnx.transformation.batchnorm_to_affine import BatchNormToAffine
+from mqonnx.core.datatype import DataType
+from mqonnx.transformation.qcdq_to_qonnx import QCDQToQuant
+from mqonnx.util.basic import qonnx_make_model
+from mqonnx.transformation.general import (
     ConvertDivToMul,
     ConvertSubToAdd,
     GiveReadableTensorNames,
     GiveUniqueNodeNames,
 )
-from qonnx.transformation.infer_datatypes import InferDataTypes
-from qonnx.transformation.remove import RemoveIdentityOps
-from qonnx.core.modelwrapper import ModelWrapper
-from qonnx.util.basic import qonnx_make_model
+from mqonnx.transformation.infer_datatypes import InferDataTypes
+from mqonnx.transformation.remove import RemoveIdentityOps
+from mqonnx.core.modelwrapper import ModelWrapper
+from mqonnx.util.basic import qonnx_make_model
 # --------------------------------------------------------
 from models.qmodels import QCNNLSTM, QCNNLSTM_subCNN, QCNNLSTM_subLSTM, QCNNLSTM_subMLP
 # --------------------------------------------------------

@@ -12,7 +12,9 @@ This step is for model's QAT training.
 This step is for brevitas model export.
 - must use brevitas 0.9.1 to make the helper work
 ```bash
+pip install onnx==1.17.0
 pip install brevitas==0.9.1
+pip install torch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1
 ```
 - update two files in ref/step2/4_quant_lstm_helper to
 - ../venv/lib/python3.10/site-packages/brevitas/export/onnx/standard/
@@ -20,7 +22,11 @@ pip install brevitas==0.9.1
 - then use 21_onnx_gen.py
 - Inputs: quantised_model_weight.pth, model_def
 - Outputs: brevitas_export_model.onnx 
+reference: https://github.com/fastmachinelearning/qonnx/tree/main/notebooks/4_quant_lstm_helper
 # step 3
+```bash
+pip install onnxruntime==1.14
+```
 This step is for qcdq model generation (model description).
 - To make life easier, we split the model to 3 submodels -> 1.1DCNN 2.LSTM 3.4-head MLP
 - Then we hand-craft the LSTM operators and replace its parameters, for part 1 and 3, we consider use standard flow, cuz their ops already supported in this version of FINN.
@@ -33,5 +39,4 @@ This step is for qcdq model generation (model description).
 This step is for finn model generation (streamlining).
 - In this step, all the script should be excuted in the FINN docker.
 - We need to update the activation function and transformation to finn src
-- The thresholding functions (ref/step4/activation.py) shall be updated to : finn/src/finn/transformation/qonnx/qonnx_activation_handlers.py
-- The transformation functions (ref/step4/transformation.py) shall be updated to : finn/src/finn/transformation/streamline
+- Some operations and transformations need to be replaced in FINN. In ref/step4/replace_finn, there are two folders which need to be replaced to your finn respo finn/src/finn/transformation, for these transformations' detail, please check the readme under ref/step4
