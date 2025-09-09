@@ -1,7 +1,7 @@
 import onnx
 import numpy as np
 #import qonnx
-from qonnx.util.basic import qonnx_make_model
+from mqonnx.util.basic import qonnx_make_model
 import onnxruntime as rt
 from onnx.helper import make_tensor_value_info, make_node, make_graph, make_model, make_tensor
 from onnx import numpy_helper

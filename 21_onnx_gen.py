@@ -158,6 +158,7 @@ def onnx_gen():
     print("Model loaded")
     model.eval()
     random_input = torch.randn(output.size(0), output.size(1))
+    print(f"Random Input shape: {random_input.size()}")
     output = model.forward(random_input)
     print(f"Q Output shape: {output.size()}")
     export_onnx_qcdq(model,random_input, opset_version=14, export_path=sub_mlp_path)
