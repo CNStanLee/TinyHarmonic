@@ -39,4 +39,8 @@ This step is for qcdq model generation (model description).
 This step is for finn model generation (streamlining).
 - In this step, all the script should be excuted in the FINN docker.
 - We need to update the activation function and transformation to finn src
-- Some operations and transformations need to be replaced in FINN. In ref/step4/replace_finn, there are two folders which need to be replaced to your finn respo finn/src/finn/transformation, for these transformations' detail, please check the readme under ref/step4
+- Some operations and transformations need to be replaced in FINN. In ref/step4/replace_finn, there are two folders and one script which need to be replaced to your finn respo finn/src/finn, for these transformations' detail, please check the readme under ref/step4
+- After the replacement, now the transformations we need to streamline the lstm finn-onnx are satisfied.
+- Run 41_streamling.py to get the streamlined onnx file.
+- Inputs: sublstm_qcdq.onnx
+- Outputs: sublstm_finn_streamlined.onnx
