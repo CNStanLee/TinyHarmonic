@@ -10,7 +10,7 @@ This step is for model's QAT training.
 - Outputs: quantised_model_weight.pth, model_def 
 # step 2
 This step is for brevitas model export.
-- must use brevitas 0.9.1 to make the helper work
+- (important) must use brevitas 0.9.1 to make the helper work
 ```bash
 pip install onnx==1.17.0
 pip install brevitas==0.9.1
@@ -39,8 +39,13 @@ This step is for qcdq model generation (model description).
 This step is for finn model generation (streamlining).
 - In this step, all the script should be excuted in the FINN docker.
 - We need to update the activation function and transformation to finn src
-- Some operations and transformations need to be replaced in FINN. In ref/step4/replace_finn, there are two folders and one script which need to be replaced to your finn respo finn/src/finn, for these transformations' detail, please check the readme under ref/step4
+- (important) Some operations and transformations need to be replaced in FINN. In ref/step4/replace_finn, there are two folders and one script which need to be replaced to your finn respo finn/src/finn, for these transformations' detail, please check the readme under ref/step4
 - After the replacement, now the transformations we need to streamline the lstm finn-onnx are satisfied.
-- Run 41_streamling.py to get the streamlined onnx file.
+- Run 41_streamling.py, and also 43, 45 to get the streamlined onnx file.
 - Inputs: sublstm_qcdq.onnx
-- Outputs: sublstm_finn_streamlined.onnx
+- Outputs: sublstm_finn_streamlined.onnx, subcnn_finn_streamlined.onnx, submlp_finn_streamlined.onnx
+# step 5
+This step is for construct weight header files for HLS coding.
+- In this step, run 51_weights_extraction.py to save the weights into .h files for HLS coding.
+- Inputs: sublstm_finn_streamlined.onnx, subcnn_finn_streamlined.onnx, submlp_finn_streamlined.onnx
+- Outputs: subcnn.h, sublstm.h, submlp.h
