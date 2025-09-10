@@ -68,6 +68,9 @@ from qonnx.util.basic import qonnx_make_model
 from qonnx.util.cleanup import cleanup as qonnx_cleanup
 
 from qonnx.transformation.change_3d_tensors_to_4d import Change3DTo4DTensors
+from qonnx.transformation.infer_data_layouts import InferDataLayouts
+from qonnx.transformation.general import RemoveUnusedTensors
+# --------------------------------------------------------
 # --------------------------------------------------------
 from models.qmodels import QCNNLSTM, QCNNLSTM_subCNN, QCNNLSTM_subLSTM, QCNNLSTM_subMLP
 # --------------------------------------------------------
@@ -204,36 +207,55 @@ def streamline_model_behavior_test(streamlined_model):
     return streamlined_output
 
 def finn_streamlining(model_finn, model_finn_streamlined_path):
+    # streamline_transformations = [
+    #         ConvertSubToAdd(),
+    #         ConvertDivToMul(),     
+    #         BatchNormToAffine(), 
+    #         ConvertSignToThres(),  
+    #         MoveMulPastMaxPool(),
+    #         MoveScalarLinearPastInvariants(),  
+    #         AbsorbSignBiasIntoMultiThreshold(),
+    #         MoveAddPastMul(),     
+    #         MoveScalarAddPastMatMul(), 
+    #         MoveAddPastConv(),       
+    #         MoveScalarMulPastConv(), 
+    #         MoveAddPastMul(), 
+    #         CollapseRepeatedAdd(),
+    #         CollapseRepeatedMul(),   
+    #         MoveMulPastMaxPool(),  
+    #         AbsorbAddIntoMultiThreshold(), 
+    #         FactorOutMulSignMagnitude(), # from shashwat
+    #         AbsorbMulIntoMultiThreshold(), #This transformation absorbs the Scalar Mul nodes into the next Multithreshold nodes.
+    #         MoveLinearPastEltwiseAdd(), #This transformation helps us get all the scalar mul nodes past the elstwiseadd. 
+    #         MoveLinearPastEltwiseMul(),#This transformation helps us get scalar mul's past eltwisemuls. We can then absorb them into the multithrehsold opertion and remove them from the graph entirely.
+    #         AbsorbMulIntoMultiThreshold(), #The scalar mul nodes passed in the previous step are now merged into the multithreshold node.
+    #         RoundAndClipThresholds(),
+    #         MoveScalarMulPastMatMul(), #To move activation scales im the dense part beyond dense layers.
+    #         AbsorbMulIntoMultiThreshold(),
+    #         MoveLinearPastEltwiseAdd(),
+    #         AbsorbMulIntoMultiThreshold(), #For the last Multithreshold node in the graph
+    #         RoundAndClipThresholds(),
+    #         CollapseRepeatedMul(),
+    #     ]
     streamline_transformations = [
-            ConvertSubToAdd(),
-            ConvertDivToMul(),     
-            BatchNormToAffine(), 
-            ConvertSignToThres(),  
-            MoveMulPastMaxPool(),
-            MoveScalarLinearPastInvariants(),  
-            AbsorbSignBiasIntoMultiThreshold(),
-            MoveAddPastMul(),     
-            MoveScalarAddPastMatMul(), 
-            MoveAddPastConv(),       
-            MoveScalarMulPastConv(), 
-            MoveAddPastMul(), 
-            CollapseRepeatedAdd(),
-            CollapseRepeatedMul(),   
-            MoveMulPastMaxPool(),  
-            AbsorbAddIntoMultiThreshold(), 
-            FactorOutMulSignMagnitude(), # from shashwat
-            AbsorbMulIntoMultiThreshold(), #This transformation absorbs the Scalar Mul nodes into the next Multithreshold nodes.
-            MoveLinearPastEltwiseAdd(), #This transformation helps us get all the scalar mul nodes past the elstwiseadd. 
-            MoveLinearPastEltwiseMul(),#This transformation helps us get scalar mul's past eltwisemuls. We can then absorb them into the multithrehsold opertion and remove them from the graph entirely.
-            AbsorbMulIntoMultiThreshold(), #The scalar mul nodes passed in the previous step are now merged into the multithreshold node.
-            RoundAndClipThresholds(),
-            MoveScalarMulPastMatMul(), #To move activation scales im the dense part beyond dense layers.
-            AbsorbMulIntoMultiThreshold(),
-            MoveLinearPastEltwiseAdd(),
-            AbsorbMulIntoMultiThreshold(), #For the last Multithreshold node in the graph
-            RoundAndClipThresholds(),
+            # 1D CONV
+            # Change3DTo4DTensors(),
+            # GENERAL
+            absorb.AbsorbSignBiasIntoMultiThreshold(),
+            Streamline(),
+            # CONV
+            # LowerConvsToMatMul(),
+            # MakeMaxPoolNHWC(),
+            # absorb.AbsorbTransposeIntoMultiThreshold(),
+            # MakeMaxPoolNHWC(),
+            # absorb.AbsorbConsecutiveTransposes(),
+            # GENERAL
+            Streamline(),
             CollapseRepeatedMul(),
-        ]
+            AbsorbMulIntoMultiThreshold(),
+            InferDataLayouts(),
+            RemoveUnusedTensors(),
+    ]
     i = 0
     for trn in streamline_transformations:
         print('Transformation = ',trn)

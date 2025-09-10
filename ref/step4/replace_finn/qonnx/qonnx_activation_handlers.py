@@ -427,6 +427,36 @@ class QuantReluHandler(QuantActBaseHandler):
         else:
             raise RuntimeError("Got an unexpected quantizer node type")
         quant_scale = self._model.get_initializer(self._q_node.input[1]).astype(np.float32)
+        # current node
+        # node_input_name = self._q_node.input[0]
+        # print(self._q_node)
+        # print(f"current node input name : {node_input_name}")
+
+        # # previous_node = self._model.find_producer(node_input_name)
+        # # previous_node_name = previous_node.name
+        # # print(f"previous node name : {previous_node_name}")
+        # # previous_node_input_name = previous_node.input[0]
+        # # print(f"previous node input name : {previous_node_input_name}")
+
+        # # pp_node = self._model.find_direct_predecessors(previous_node)
+        # # print(f"pp_node : {pp_node}")
+
+        # # ppp_node = self._model.find_direct_predecessors(pp_node)
+        # # print(f"ppp_node : {ppp_node}")
+        # p_node = self._model.find_direct_predecessors(self._q_node)
+        # print(f"p_node : {p_node}")
+        # pp_node = self._model.find_direct_predecessors(p_node[0])
+        # print(f"pp_node : {pp_node}")
+        # # i0 = pp_node[0].input[1].value
+        # # print(f"i0 : {i0}")
+
+
+
+        # ppp_node = self._model.find_direct_predecessors(pp_node[0]) 
+        # print(f"ppp_node : {ppp_node}")
+        # pppp_node = self._model.find_direct_predecessors(ppp_node[0])
+        # print(f"pppp_node : {pppp_node}")
+
         act_node = self._model.find_direct_predecessors(self._q_node)
         act_node = act_node[0]
         if act_node.op_type == "Relu":
@@ -471,6 +501,20 @@ class QuantReluHandler(QuantActBaseHandler):
                         thresholds[c][t] = step / selu_scale
 
         elif act_node.op_type == "Sigmoid" :
+            # sigmoid
+            # 7->8, 3->4, 1->2
+            # tanh
+            # 5->6, 9->10
+            scale_1 = self._model.get_initializer('scale_1', return_dtype=False)
+            scale_2 = self._model.get_initializer('scale_2', return_dtype=False)
+            scale_3 = self._model.get_initializer('scale_3', return_dtype=False)
+            scale_4 = self._model.get_initializer('scale_4', return_dtype=False)
+            scale_5 = self._model.get_initializer('scale_5', return_dtype=False)
+            scale_6 = self._model.get_initializer('scale_6', return_dtype=False)
+            scale_7 = self._model.get_initializer('scale_7', return_dtype=False)
+            scale_8 = self._model.get_initializer('scale_8', return_dtype=False)
+            scale_9 = self._model.get_initializer('scale_9', return_dtype=False)
+            scale_10 = self._model.get_initializer('scale_10', return_dtype=False)
             q_inst = getCustomOp(self._q_node)
             flag = 0
             narrow = q_inst.get_nodeattr("narrow")
@@ -483,18 +527,18 @@ class QuantReluHandler(QuantActBaseHandler):
             
             if(bit_width == 8):
                 max_range = (1/quant_scale) #(This I used for INT8 quantization with precomputed scales)
-            if(bit_width == 6 and quant_scale == 0.013812770135700703 ):#Post-activation quantizer scale
-                max_range =  31*0.0697396919131279            #Pre-activation quantizer scale
-                min_range = -31*0.0697396919131279              #Pre-activation quantizer scale
+            if(bit_width == 6 and quant_scale == scale_8 ):#Post-activation quantizer scale
+                max_range =  31*scale_7          #Pre-activation quantizer scale
+                min_range = -31*scale_7              #Pre-activation quantizer scale
                 print("Sigmoid1",quant_scale)
-            if(bit_width == 6 and quant_scale == 0.014795037917792797): #Post-activation quantizer scale
-                max_range =  31*0.08846518397331238               #Pre-activation quantizer scale
-                min_range = -31*0.08846518397331238            #Pre-activation quantizer scale
+            if(bit_width == 6 and quant_scale == scale_4): #Post-activation quantizer scale
+                max_range =  31*scale_3               #Pre-activation quantizer scale
+                min_range = -31*scale_3            #Pre-activation quantizer scale
                 print("Sigmoid2",quant_scale)
-            if(bit_width == 6 and quant_scale == 0.014122666791081429): #Post-activation quantizer scale
-                max_range =  31*0.06339830160140991           #Pre-activation quantizer scale
-                min_range = -31*0.06339830160140991             #Pre-activation quantizer scale
-                print("Sigmoid3",quant_scale)   
+            if(bit_width == 6 and quant_scale == scale_2): #Post-activation quantizer scale
+                max_range =  31*scale_1          #Pre-activation quantizer scale
+                min_range = -31*scale_1             #Pre-activation quantizer scale
+                print("Sigmoid3",quant_scale)
 
             # max_range = round(max_range)
             #Defining inputs that the sigmoid activation will see
@@ -556,6 +600,20 @@ class QuantReluHandler(QuantActBaseHandler):
                     thresholds[i] = max_range+1 
 
         elif act_node.op_type == "Tanh" :
+            # sigmoid
+            # 7->8, 3->4, 1->2
+            # tanh
+            # 5->6, 9->10
+            scale_1 = self._model.get_initializer('scale_1', return_dtype=False)
+            scale_2 = self._model.get_initializer('scale_2', return_dtype=False)
+            scale_3 = self._model.get_initializer('scale_3', return_dtype=False)
+            scale_4 = self._model.get_initializer('scale_4', return_dtype=False)
+            scale_5 = self._model.get_initializer('scale_5', return_dtype=False)
+            scale_6 = self._model.get_initializer('scale_6', return_dtype=False)
+            scale_7 = self._model.get_initializer('scale_7', return_dtype=False)
+            scale_8 = self._model.get_initializer('scale_8', return_dtype=False)
+            scale_9 = self._model.get_initializer('scale_9', return_dtype=False)
+            scale_10 = self._model.get_initializer('scale_10', return_dtype=False)
             q_inst = getCustomOp(self._q_node)
             narrow = q_inst.get_nodeattr("narrow")
             if narrow:
@@ -568,15 +626,15 @@ class QuantReluHandler(QuantActBaseHandler):
             if(bit_width == 8):
                 max_range = (1/quant_scale)
                 max_range = round(max_range)
-            if(bit_width==6 and quant_scale == 0.023927057161927223):#Post-activation quantizer scale
-                max_range = 31 *0.03166016563773155   #Pre-activation quantizer scale
-                min_range = -31*0.03166016563773155  #Pre-activation quantizer scale
+            if(bit_width==6 and quant_scale == scale_6):#Post-activation quantizer scale
+                max_range = 31 *scale_5   #Pre-activation quantizer scale
+                min_range = -31*scale_5  #Pre-activation quantizer scale
                 # max_range = round(max_range)
                 # min_range = round(min_range)
                 print("Tanh1",quant_scale)
-            if(bit_width==6 and quant_scale == 0.028057008981704712): ##Post-activation quantizer scale
-                max_range = 31* 0.045602329075336456                         #Pre-activation quantizer scale
-                min_range = -31*0.045602329075336456                     #Pre-activation quantizer scale
+            if(bit_width==6 and quant_scale == scale_10): ##Post-activation quantizer scale
+                max_range = 31* scale_9                         #Pre-activation quantizer scale
+                min_range = -31*scale_9                     #Pre-activation quantizer scale
                 # max_range = round(max_range)
                 # min_range = round(min_range)
                 print("Tanh2",quant_scale)
