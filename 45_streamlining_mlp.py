@@ -205,7 +205,6 @@ def streamline_model_behavior_test(streamlined_model):
 
 def finn_streamlining(model_finn, model_finn_streamlined_path):
     streamline_transformations = [
-            Change3DTo4DTensors(),
             ConvertSubToAdd(),
             ConvertDivToMul(),     
             BatchNormToAffine(), 

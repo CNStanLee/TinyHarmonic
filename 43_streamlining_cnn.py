@@ -42,9 +42,12 @@ from finn.transformation.streamline.reorder import (
     MoveTransposePastScalarMul,
     MoveTransposePastJoinAdd
 )
+from qonnx.transformation.lower_convs_to_matmul import LowerConvsToMatMul
+from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.transformation.streamline.sign_to_thres import ConvertSignToThres
 from finn.transformation.qonnx.convert_qonnx_to_finn import ConvertQONNXtoFINN
+
 # --------------------------------------------------------
 from qonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNodeNames, RemoveStaticGraphInputs
 from qonnx.transformation.infer_shapes import InferShapes
@@ -140,7 +143,9 @@ submlp_def = QCNNLSTM_subMLP(
                     )
 # --------------------------------------------------------
 x = np.random.randn(submodel_input_size,1).astype(np.float32).reshape([submodel_input_size,1])
-
+print(x.shape)
+x = np.expand_dims(x, axis=1) # shape to (batch, channel, feature)
+print(x.shape)
 h0 = np.zeros((hidden_size, batch_size), dtype=np.float32)
 c0 = np.zeros((hidden_size, batch_size), dtype=np.float32)
 
@@ -148,7 +153,7 @@ input_dict = {}
 input_dict["X"] = x
 input_dict["h_t-1"] = h0
 input_dict["c_t-1"] = c0
-input_dict["global_in"] = x.transpose(1,0)
+input_dict["global_in"] = x.transpose(1,2,0)
 
 def convert_brevitas_to_qonnx(model, weight_path, random_input, model_qonnx_path):
     print("step 1: brevitas to qonnx")
@@ -163,7 +168,8 @@ def brevitas_behavior_test(qmodel, qmodel_pth_path):
     qmodel.eval()
     with torch.no_grad():
         print(x.shape)
-        x_torch = torch.from_numpy(x).permute(1,0).unsqueeze(0)
+        x_torch = torch.from_numpy(x).permute(1,2,0)
+        print(x_torch.shape)
         #print(f"brevitas_input: {x_torch}")
         #print(x_torch.shape)
         with torch.no_grad():
@@ -201,6 +207,7 @@ def finn_tidyup(model_finn, model_finn_tidy_up_path):
     return tidy_finn
 
 def streamline_model_behavior_test(streamlined_model):
+    input_dict["global_in"] = np.expand_dims(input_dict["global_in"], axis=-1)   # add batch dim
     output_dict_streamlined = oxe.execute_onnx(streamlined_model, input_dict,return_full_exec_context=True)
     streamlined_output = np.array(output_dict_streamlined.get("global_out")) 
     print("Streamlined output shape:", streamlined_output.shape)
@@ -208,7 +215,16 @@ def streamline_model_behavior_test(streamlined_model):
 
 def finn_streamlining(model_finn, model_finn_streamlined_path):
     streamline_transformations = [
+            #add conv
             Change3DTo4DTensors(),
+            #absorb.AbsorbScalarMulAddIntoTopK(),
+            LowerConvsToMatMul(),
+            MakeMaxPoolNHWC(),
+            AbsorbTransposeIntoMultiThreshold(),
+            MakeMaxPoolNHWC(),
+            absorb.AbsorbConsecutiveTransposes(),
+            #end add conv
+
             ConvertSubToAdd(),
             ConvertDivToMul(),     
             BatchNormToAffine(), 
@@ -216,6 +232,7 @@ def finn_streamlining(model_finn, model_finn_streamlined_path):
             MoveMulPastMaxPool(),
             MoveScalarLinearPastInvariants(),  
             AbsorbSignBiasIntoMultiThreshold(),
+
             MoveAddPastMul(),     
             MoveScalarAddPastMatMul(), 
             MoveAddPastConv(),       
@@ -259,7 +276,7 @@ if __name__ == "__main__":
     sub_model = subcnn_def
     brevitas_behaviour = brevitas_behavior_test(sub_model, qmodel_pth_path)
     # qcdq -> qonnx
-    random_input = torch.randn(batch_size, input_size)
+    random_input = torch.randn(batch_size, 1, input_size)
     model_qonnx = convert_brevitas_to_qonnx(sub_model, qmodel_pth_path, random_input, model_qonnx_path)
     
     # behavior test: brevitas vs qonnx
@@ -274,7 +291,7 @@ if __name__ == "__main__":
     tidy_finn = finn_tidyup(model_finn, model_finn_tidy_up_path)
     finn_streamlining = finn_streamlining(tidy_finn, model_finn_streamlined_path)
     streamlined_behaviour = streamline_model_behavior_test(finn_streamlining)
-    mse_finn_streamlined = np.mean((finn_onnx_behaviour - streamlined_behaviour) ** 2)
+    mse_finn_streamlined = np.mean((finn_onnx_behaviour - np.squeeze(streamlined_behaviour, axis=-1)) ** 2)
     print(f'MSE(FINN model and streamlined FINN model): {mse_finn_streamlined}')
 
 

@@ -17,7 +17,7 @@ import torch.nn.functional as F
 import brevitas.nn as qnn
 from brevitas.quant import Int8ActPerTensorFloat, Uint8ActPerTensorFloat
 
-# 假设这些量化位宽已在代码其他部分定义
+# quant bit widths
 cnn_weight_bit_width = 4
 cnn_activation_bit_width = 4
 lstm_weight_bit_width = 8
@@ -35,7 +35,6 @@ class QCNNLSTM(nn.Module):
         self.lstm_num_layers = lstm_num_layers
         self.lstm_hidden_size = lstm_hidden_size
 
-        # 添加8bit量化输入层
         self.input_quant = qnn.QuantIdentity(bit_width=8)
         
         self.qcnn = nn.Sequential(
@@ -80,8 +79,8 @@ class QCNNLSTM(nn.Module):
             self.qmlp_heads.append(nn.Sequential(*layers))
         
     def forward(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # **Reshape input to (batch_size, 1, input_size)
+        # if x.dim() == 2:
+        #     x = x.unsqueeze(1)  # **Reshape input to (batch_size, 1, input_size)
         
         # 应用输入量化
         x = self.input_quant(x)
@@ -158,11 +157,13 @@ class QCNNLSTM_subCNN(nn.Module):
             self.qmlp_heads.append(nn.Sequential(*layers))
         
     def forward(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # **Reshape input to (batch_size, 1, input_size)
+        # if x.dim() == 2:
+        #     x = x.unsqueeze(1)  # **Reshape input to (batch_size, 1, input_size)
         
         # 应用输入量化
         x = self.input_quant(x)
+        # print("forward in subCNN")
+        # print(x.shape)
         
         batch_size = x.size(0)
         h0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
@@ -249,7 +250,6 @@ class QCNNLSTM_subMLP(nn.Module):
         self.lstm_num_layers = lstm_num_layers
         self.lstm_hidden_size = lstm_hidden_size
 
-        # 添加8bit量化输入层
         self.input_quant = qnn.QuantIdentity(bit_width=8)
         
         self.qcnn = nn.Sequential(

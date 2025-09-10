@@ -506,8 +506,11 @@ class TrainerQLSTMHarmonic:
         plt.savefig(os.path.join(self.model_folder, 'training_progress.png'))
         plt.close()
 
-    def test(self, testloader):
+    def test(self, testloader, from_final = False):
         """在测试集上评估模型性能，包括选择的误差指标和TMAPE，并打印3组输入、GT和模型输出"""
+        if from_final:
+            self.model.load_state_dict(torch.load(os.path.join(self.model_folder, 'final_model.pt')))
+
         self.model.eval()
         test_loss, test_mae, test_mse, test_r2, test_adjusted_r2 = 0.0, 0.0, 0.0, 0.0, 0.0
         test_channel_mae = [0.0, 0.0, 0.0, 0.0]
@@ -702,7 +705,7 @@ class TrainerQLSTMHarmonic:
                 targets = targets.to(self.device)
 
                 # 使用FFT替代模型进行谐波幅度估计
-                batch_size, signal_length = signals.shape
+                batch_size,_, signal_length = signals.shape
                 outputs = torch.zeros(batch_size, 4, device=self.device)  # 4个谐波分量
                 
                 # 逆归一化信号
@@ -728,10 +731,16 @@ class TrainerQLSTMHarmonic:
                         # 计算对应的频率索引
                         idx = int(round(freq / freq_resolution))
                         if idx < len(fft_magnitude):
-                            outputs[i, j] = fft_magnitude[idx]
+                            # 确保提取的是标量值
+                            harmonic_magnitude = fft_magnitude[idx]
+                            # 如果 harmonic_magnitude 是数组，取其第一个元素
+                            if isinstance(harmonic_magnitude, np.ndarray):
+                                harmonic_magnitude = harmonic_magnitude.item() if harmonic_magnitude.size == 1 else harmonic_magnitude[0]
+                            outputs[i, j] = torch.tensor(harmonic_magnitude, 
+                                        device=self.device, 
+                                        dtype=torch.float)
                         else:
                             outputs[i, j] = 0.0  # 如果频率超出范围，设为0
-                
                 # 注意：FFT输出已经是实际幅度，不需要再乘以test_output_scale
                 # 但目标值需要缩放
                 targets = targets * test_output_scale

@@ -136,19 +136,19 @@ def QAT(qmodel_name, qmodel_def, fmodel_pt_path):
     
     qmodel = qmodel_def.to(device)
 
-    random_input = torch.randn(batch_size, input_size).to(device)
+    random_input = torch.randn(batch_size, 1, input_size).to(device)
+    print(f"Input shape: {random_input.size()}")
     output = qmodel.forward(random_input)
-    #print(f"QAT model output: {output}")
+    # #print(f"QAT model output: {output}")
     print(f"Q Output shape: {output.size()}")
+
+
     optimizer = optim.Adam(qmodel.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=5, verbose=True
     )
 
-    fmodel = fmodel_def.to(device)
-    output = fmodel.forward(random_input)
-    print(f"F Output shape: {output.size()}")
-    print(f"result difference: {(output - output).abs().max()}")
+
     trainer = TrainerQLSTMHarmonic(
         model=qmodel,
         trainloader=train_loader,
@@ -170,6 +170,9 @@ def QAT(qmodel_name, qmodel_def, fmodel_pt_path):
     )
     trainer.train()
     trainer.test(test_loader)
+    
+    
+    # there is no need to test fft cuz 0.5 cycle wont work for fft
     #trainer.test_fft(test_loader)
 
 def main():

@@ -128,10 +128,12 @@ class HarmonicDataset:
         if self.augment:
             input_data = self.apply_augmentation(input_data)
         
+        # 使用 NumPy 添加维度 (相当于 unsqueeze(1))
+        input_data = np.expand_dims(input_data, axis=0)
+        
         if self.vehicle_ids is not None:
             return input_data, target_data, self.vehicle_ids[idx]
         return input_data, target_data
-    
     def apply_augmentation(self, data):
         """对单个样本应用增强"""
         cfg = self.augment_config
