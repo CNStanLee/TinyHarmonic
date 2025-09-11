@@ -37,7 +37,8 @@ This step is for qcdq model generation (model description).
 - Outputs: sublstm_qcdq.onnx, subcnn.onnx. submlp.onnx
 # step 4
 This step is for finn model generation (streamlining).
-- In this step, all the script should be excuted in the FINN docker.
+- In this step, all the script should be excuted in the FINN docker (qonnx
+Version: 0.3.0.post1.dev131+g2281a77.d20250909).
 - We need to update the activation function and transformation to finn src
 - (important) Some operations and transformations need to be replaced in FINN. In ref/step4/replace_finn, there are two folders and one script which need to be replaced to your finn respo finn/src/finn, for these transformations' detail, please check the readme under ref/step4
 - After the replacement, now the transformations we need to streamline the lstm finn-onnx are satisfied.

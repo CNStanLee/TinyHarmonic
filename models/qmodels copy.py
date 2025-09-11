@@ -25,6 +25,78 @@ lstm_activation_bit_width = 6 # change to 6 need tot retrain the model
 linear_weight_bit_width = 4
 linear_activation_bit_width = 4
 
+class QCNNLSTM(nn.Module):
+    def __init__(self, input_size=32, cnn_channels=64, kernel_size=3, 
+                lstm_hidden_size=128, lstm_num_layers=1, 
+                mlp_hidden_size=256, mlp_num_layers=3, dropout=0.2, num_heads=4):
+        super(QCNNLSTM, self).__init__()
+        self.input_size = input_size
+        self.num_heads = num_heads
+        self.lstm_num_layers = lstm_num_layers
+        self.lstm_hidden_size = lstm_hidden_size
+
+        self.input_quant = qnn.QuantIdentity(bit_width=8)
+        
+        self.qcnn = nn.Sequential(
+            qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=kernel_size//2,
+                            weight_bit_width=cnn_weight_bit_width),
+            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
+            nn.BatchNorm1d(cnn_channels),
+            nn.Dropout(dropout),
+            qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=kernel_size//2, weight_bit_width=cnn_weight_bit_width),
+            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
+            nn.BatchNorm1d(cnn_channels*2),
+            nn.Dropout(dropout),
+            nn.MaxPool1d(kernel_size=2, stride=2)
+        )
+
+        self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size,num_layers=lstm_num_layers,batch_first=True,
+            weight_bit_width=lstm_weight_bit_width,
+            io_quant=Int8ActPerTensorFloat,
+            gate_acc_bit_width=lstm_activation_bit_width,
+            sigmoid_bit_width=lstm_activation_bit_width,
+            tanh_bit_width=lstm_activation_bit_width,
+            cell_state_bit_width=lstm_activation_bit_width,
+            bias_quant=None)
+        
+        self.qmlp_heads = nn.ModuleList()
+        for _ in range(num_heads):
+            layers = []
+
+            layers.append(qnn.QuantLinear(lstm_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
+            layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
+            layers.append(nn.BatchNorm1d(mlp_hidden_size))
+            layers.append(nn.Dropout(dropout))
+            
+            for _ in range(mlp_num_layers - 1):
+                layers.append(qnn.QuantLinear(mlp_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
+                layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
+                layers.append(nn.BatchNorm1d(mlp_hidden_size))
+                layers.append(nn.Dropout(dropout))
+
+            layers.append(qnn.QuantLinear(mlp_hidden_size, 1, bias=True, weight_bit_width=linear_weight_bit_width))
+
+            self.qmlp_heads.append(nn.Sequential(*layers))
+        
+    def forward(self, x):
+        x = self.input_quant(x)
+        
+        batch_size = x.size(0)
+        h0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
+        c0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
+
+        qcnn_out = self.qcnn(x)
+        qcnn_out = qcnn_out.permute(0, 2, 1)  # (batch_size, seq_len, features)
+        qlstmout, (hn, cn) = self.qlstm(qcnn_out, (h0.detach(), c0.detach()))
+        qlstmout = hn[-1, :, :]  
+        qlstmout = qlstmout.view(batch_size, -1)
+        outputs = []
+        for head in self.qmlp_heads:
+            out = head(qlstmout)
+            outputs.append(out)
+        out = torch.cat(outputs, dim=1) 
+
+        return out
 # class QCNNLSTM(nn.Module):
 #     def __init__(self, input_size=32, cnn_channels=64, kernel_size=3, 
 #                 lstm_hidden_size=128, lstm_num_layers=1, 
@@ -37,20 +109,28 @@ linear_activation_bit_width = 4
 
 #         self.input_quant = qnn.QuantIdentity(bit_width=8)
         
+#         # 计算CNN输出尺寸
+#         # 第一层卷积: (input_size - kernel_size + 1)
+#         conv1_out = input_size - kernel_size + 1
+#         # 第二层卷积: (conv1_out - kernel_size + 1)
+#         conv2_out = conv1_out - kernel_size + 1
+#         # 最大池化: floor(conv2_out / 2)
+#         self.cnn_output_size = conv2_out // 2
+
 #         self.qcnn = nn.Sequential(
-#             qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=kernel_size//2,
+#             qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=0,  # 移除padding
 #                             weight_bit_width=cnn_weight_bit_width),
 #             qnn.QuantReLU(bit_width=cnn_activation_bit_width),
 #             nn.BatchNorm1d(cnn_channels),
 #             nn.Dropout(dropout),
-#             qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=kernel_size//2, weight_bit_width=cnn_weight_bit_width),
+#             qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=0, weight_bit_width=cnn_weight_bit_width),  # 移除padding
 #             qnn.QuantReLU(bit_width=cnn_activation_bit_width),
 #             nn.BatchNorm1d(cnn_channels*2),
 #             nn.Dropout(dropout),
 #             nn.MaxPool1d(kernel_size=2, stride=2)
 #         )
 
-#         self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size,num_layers=lstm_num_layers,batch_first=True,
+#         self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size, num_layers=lstm_num_layers, batch_first=True,
 #             weight_bit_width=lstm_weight_bit_width,
 #             io_quant=Int8ActPerTensorFloat,
 #             gate_acc_bit_width=lstm_activation_bit_width,
@@ -86,6 +166,9 @@ linear_activation_bit_width = 4
 #         c0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
 
 #         qcnn_out = self.qcnn(x)
+#         # 检查CNN输出尺寸是否符合预期
+#         assert qcnn_out.size(2) == self.cnn_output_size, f"CNN output size mismatch: expected {self.cnn_output_size}, got {qcnn_out.size(2)}"
+        
 #         qcnn_out = qcnn_out.permute(0, 2, 1)  # (batch_size, seq_len, features)
 #         qlstmout, (hn, cn) = self.qlstm(qcnn_out, (h0.detach(), c0.detach()))
 #         qlstmout = hn[-1, :, :]  
@@ -97,89 +180,6 @@ linear_activation_bit_width = 4
 #         out = torch.cat(outputs, dim=1) 
 
 #         return out
-class QCNNLSTM(nn.Module):
-    def __init__(self, input_size=32, cnn_channels=64, kernel_size=3, 
-                lstm_hidden_size=128, lstm_num_layers=1, 
-                mlp_hidden_size=256, mlp_num_layers=3, dropout=0.2, num_heads=4):
-        super(QCNNLSTM, self).__init__()
-        self.input_size = input_size
-        self.num_heads = num_heads
-        self.lstm_num_layers = lstm_num_layers
-        self.lstm_hidden_size = lstm_hidden_size
-
-        self.input_quant = qnn.QuantIdentity(bit_width=8)
-        
-        # 计算CNN输出尺寸
-        # 第一层卷积: (input_size - kernel_size + 1)
-        conv1_out = input_size - kernel_size + 1
-        # 第二层卷积: (conv1_out - kernel_size + 1)
-        conv2_out = conv1_out - kernel_size + 1
-        # 最大池化: floor(conv2_out / 2)
-        self.cnn_output_size = conv2_out // 2
-
-        self.qcnn = nn.Sequential(
-            qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=0,  # 移除padding
-                            weight_bit_width=cnn_weight_bit_width),
-            nn.BatchNorm1d(cnn_channels),
-            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
-            nn.Dropout(dropout),
-            qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=0, weight_bit_width=cnn_weight_bit_width),  # 移除padding
-            nn.BatchNorm1d(cnn_channels*2),
-            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
-            nn.Dropout(dropout),
-            nn.MaxPool1d(kernel_size=2, stride=2)
-        )
-
-        self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size, num_layers=lstm_num_layers, batch_first=True,
-            weight_bit_width=lstm_weight_bit_width,
-            io_quant=Int8ActPerTensorFloat,
-            gate_acc_bit_width=lstm_activation_bit_width,
-            sigmoid_bit_width=lstm_activation_bit_width,
-            tanh_bit_width=lstm_activation_bit_width,
-            cell_state_bit_width=lstm_activation_bit_width,
-            bias_quant=None)
-        
-        self.qmlp_heads = nn.ModuleList()
-        for _ in range(num_heads):
-            layers = []
-
-            layers.append(qnn.QuantLinear(lstm_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
-            layers.append(nn.BatchNorm1d(mlp_hidden_size))
-            layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
-            layers.append(nn.Dropout(dropout))
-            
-            for _ in range(mlp_num_layers - 1):
-                layers.append(qnn.QuantLinear(mlp_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
-                layers.append(nn.BatchNorm1d(mlp_hidden_size))
-                layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
-                layers.append(nn.Dropout(dropout))
-
-            layers.append(qnn.QuantLinear(mlp_hidden_size, 1, bias=True, weight_bit_width=linear_weight_bit_width))
-
-            self.qmlp_heads.append(nn.Sequential(*layers))
-        
-    def forward(self, x):
-        x = self.input_quant(x)
-        
-        batch_size = x.size(0)
-        h0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
-        c0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
-
-        qcnn_out = self.qcnn(x)
-        # 检查CNN输出尺寸是否符合预期
-        assert qcnn_out.size(2) == self.cnn_output_size, f"CNN output size mismatch: expected {self.cnn_output_size}, got {qcnn_out.size(2)}"
-        
-        qcnn_out = qcnn_out.permute(0, 2, 1)  # (batch_size, seq_len, features)
-        qlstmout, (hn, cn) = self.qlstm(qcnn_out, (h0.detach(), c0.detach()))
-        qlstmout = hn[-1, :, :]  
-        qlstmout = qlstmout.view(batch_size, -1)
-        outputs = []
-        for head in self.qmlp_heads:
-            out = head(qlstmout)
-            outputs.append(out)
-        out = torch.cat(outputs, dim=1) 
-
-        return out
     
 class QCNNLSTM_subCNN(nn.Module):
     def __init__(self, input_size=32, cnn_channels=64, kernel_size=3, 
@@ -191,31 +191,23 @@ class QCNNLSTM_subCNN(nn.Module):
         self.lstm_num_layers = lstm_num_layers
         self.lstm_hidden_size = lstm_hidden_size
 
-        # 计算CNN输出尺寸
-        # 第一层卷积: (input_size - kernel_size + 1)
-        conv1_out = input_size - kernel_size + 1
-        # 第二层卷积: (conv1_out - kernel_size + 1)
-        conv2_out = conv1_out - kernel_size + 1
-        # 最大池化: floor(conv2_out / 2)
-        self.cnn_output_size = conv2_out // 2
-
         # 添加8bit量化输入层
         self.input_quant = qnn.QuantIdentity(bit_width=8)
         
         self.qcnn = nn.Sequential(
-            qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=0,  # 移除padding
+            qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=kernel_size//2,
                             weight_bit_width=cnn_weight_bit_width),
+            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
             nn.BatchNorm1d(cnn_channels),
-            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
             nn.Dropout(dropout),
-            qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=0, weight_bit_width=cnn_weight_bit_width),  # 移除padding
-            nn.BatchNorm1d(cnn_channels*2),
+            qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=kernel_size//2, weight_bit_width=cnn_weight_bit_width),
             qnn.QuantReLU(bit_width=cnn_activation_bit_width),
+            nn.BatchNorm1d(cnn_channels*2),
             nn.Dropout(dropout),
             nn.MaxPool1d(kernel_size=2, stride=2)
         )
 
-        self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size, num_layers=lstm_num_layers, batch_first=True,
+        self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size,num_layers=lstm_num_layers,batch_first=True,
             weight_bit_width=lstm_weight_bit_width,
             io_quant=Int8ActPerTensorFloat,
             gate_acc_bit_width=lstm_activation_bit_width,
@@ -229,14 +221,14 @@ class QCNNLSTM_subCNN(nn.Module):
             layers = []
 
             layers.append(qnn.QuantLinear(lstm_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
-            layers.append(nn.BatchNorm1d(mlp_hidden_size))
             layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
+            layers.append(nn.BatchNorm1d(mlp_hidden_size))
             layers.append(nn.Dropout(dropout))
             
             for _ in range(mlp_num_layers - 1):
                 layers.append(qnn.QuantLinear(mlp_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
-                layers.append(nn.BatchNorm1d(mlp_hidden_size))
                 layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
+                layers.append(nn.BatchNorm1d(mlp_hidden_size))
                 layers.append(nn.Dropout(dropout))
 
             layers.append(qnn.QuantLinear(mlp_hidden_size, 1, bias=True, weight_bit_width=linear_weight_bit_width))
@@ -244,17 +236,19 @@ class QCNNLSTM_subCNN(nn.Module):
             self.qmlp_heads.append(nn.Sequential(*layers))
         
     def forward(self, x):
+        # if x.dim() == 2:
+        #     x = x.unsqueeze(1)  # **Reshape input to (batch_size, 1, input_size)
+        
         # 应用输入量化
         x = self.input_quant(x)
+        # print("forward in subCNN")
+        # print(x.shape)
         
         batch_size = x.size(0)
         h0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
         c0 = torch.zeros(self.lstm_num_layers, batch_size, self.lstm_hidden_size).requires_grad_().to(x.device)
 
         qcnn_out = self.qcnn(x)
-        # 检查CNN输出尺寸是否符合预期
-        assert qcnn_out.size(2) == self.cnn_output_size, f"CNN output size mismatch: expected {self.cnn_output_size}, got {qcnn_out.size(2)}"
-        
         qcnn_out = qcnn_out.permute(0, 2, 1)
 
         return qcnn_out
@@ -269,28 +263,23 @@ class QCNNLSTM_subLSTM(nn.Module):
         self.lstm_num_layers = lstm_num_layers
         self.lstm_hidden_size = lstm_hidden_size
 
-        # 计算CNN输出尺寸（与subCNN保持一致）
-        conv1_out = input_size - kernel_size + 1
-        conv2_out = conv1_out - kernel_size + 1
-        self.cnn_output_size = conv2_out // 2
-
         # 添加8bit量化输入层
         self.input_quant = qnn.QuantIdentity(bit_width=8)
         
         self.qcnn = nn.Sequential(
-            qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=0,  # 移除padding
+            qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=kernel_size//2,
                             weight_bit_width=cnn_weight_bit_width),
+            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
             nn.BatchNorm1d(cnn_channels),
-            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
             nn.Dropout(dropout),
-            qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=0, weight_bit_width=cnn_weight_bit_width),  # 移除padding
-            nn.BatchNorm1d(cnn_channels*2),
+            qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=kernel_size//2, weight_bit_width=cnn_weight_bit_width),
             qnn.QuantReLU(bit_width=cnn_activation_bit_width),
+            nn.BatchNorm1d(cnn_channels*2),
             nn.Dropout(dropout),
             nn.MaxPool1d(kernel_size=2, stride=2)
         )
 
-        self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size, num_layers=lstm_num_layers, batch_first=True,
+        self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size,num_layers=lstm_num_layers,batch_first=True,
             weight_bit_width=lstm_weight_bit_width,
             io_quant=Int8ActPerTensorFloat,
             gate_acc_bit_width=lstm_activation_bit_width,
@@ -304,14 +293,14 @@ class QCNNLSTM_subLSTM(nn.Module):
             layers = []
 
             layers.append(qnn.QuantLinear(lstm_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
-            layers.append(nn.BatchNorm1d(mlp_hidden_size))
             layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
+            layers.append(nn.BatchNorm1d(mlp_hidden_size))
             layers.append(nn.Dropout(dropout))
             
             for _ in range(mlp_num_layers - 1):
                 layers.append(qnn.QuantLinear(mlp_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
-                layers.append(nn.BatchNorm1d(mlp_hidden_size))
                 layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
+                layers.append(nn.BatchNorm1d(mlp_hidden_size))
                 layers.append(nn.Dropout(dropout))
 
             layers.append(qnn.QuantLinear(mlp_hidden_size, 1, bias=True, weight_bit_width=linear_weight_bit_width))
@@ -340,27 +329,22 @@ class QCNNLSTM_subMLP(nn.Module):
         self.lstm_num_layers = lstm_num_layers
         self.lstm_hidden_size = lstm_hidden_size
 
-        # 计算CNN输出尺寸（与subCNN保持一致）
-        conv1_out = input_size - kernel_size + 1
-        conv2_out = conv1_out - kernel_size + 1
-        self.cnn_output_size = conv2_out // 2
-
         self.input_quant = qnn.QuantIdentity(bit_width=8)
         
         self.qcnn = nn.Sequential(
-            qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=0,  # 移除padding
+            qnn.QuantConv1d(in_channels=1, out_channels=cnn_channels, kernel_size=kernel_size, padding=kernel_size//2,
                             weight_bit_width=cnn_weight_bit_width),
+            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
             nn.BatchNorm1d(cnn_channels),
-            qnn.QuantReLU(bit_width=cnn_activation_bit_width),
             nn.Dropout(dropout),
-            qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=0, weight_bit_width=cnn_weight_bit_width),  # 移除padding
-            nn.BatchNorm1d(cnn_channels*2),
+            qnn.QuantConv1d(cnn_channels, cnn_channels*2, kernel_size, padding=kernel_size//2, weight_bit_width=cnn_weight_bit_width),
             qnn.QuantReLU(bit_width=cnn_activation_bit_width),
+            nn.BatchNorm1d(cnn_channels*2),
             nn.Dropout(dropout),
             nn.MaxPool1d(kernel_size=2, stride=2)
         )
 
-        self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size, num_layers=lstm_num_layers, batch_first=True,
+        self.qlstm = bnn.QuantLSTM(input_size=cnn_channels*2, hidden_size=lstm_hidden_size,num_layers=lstm_num_layers,batch_first=True,
             weight_bit_width=lstm_weight_bit_width,
             io_quant=Int8ActPerTensorFloat,
             gate_acc_bit_width=lstm_activation_bit_width,
@@ -374,14 +358,14 @@ class QCNNLSTM_subMLP(nn.Module):
             layers = []
 
             layers.append(qnn.QuantLinear(lstm_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
-            layers.append(nn.BatchNorm1d(mlp_hidden_size))
             layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
+            layers.append(nn.BatchNorm1d(mlp_hidden_size))
             layers.append(nn.Dropout(dropout))
             
             for _ in range(mlp_num_layers - 1):
                 layers.append(qnn.QuantLinear(mlp_hidden_size, mlp_hidden_size, bias=True, weight_bit_width=linear_weight_bit_width))
-                layers.append(nn.BatchNorm1d(mlp_hidden_size))
                 layers.append(qnn.QuantReLU(bit_width=linear_activation_bit_width))
+                layers.append(nn.BatchNorm1d(mlp_hidden_size))
                 layers.append(nn.Dropout(dropout))
 
             layers.append(qnn.QuantLinear(mlp_hidden_size, 1, bias=True, weight_bit_width=linear_weight_bit_width))

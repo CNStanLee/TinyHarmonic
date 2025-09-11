@@ -40,7 +40,8 @@ from finn.transformation.streamline.reorder import (
     MoveLinearPastEltwiseAdd,
     MoveLinearPastEltwiseMul,
     MoveTransposePastScalarMul,
-    MoveTransposePastJoinAdd
+    MoveTransposePastJoinAdd,
+    MoveMulPastDWConv
 )
 from qonnx.transformation.lower_convs_to_matmul import LowerConvsToMatMul
 from finn.transformation.streamline.reorder import MakeMaxPoolNHWC
@@ -93,7 +94,7 @@ lstm_hidden_size=128 # was 128
 lstm_num_layers=1
 mlp_hidden_size=512 # was 256 broader is much better
 mlp_num_layers=1 # was 3
-dropout=0.2
+dropout=0.1
 num_heads=4
 batch_size = 1
 # --------------------------------------------------------
@@ -257,6 +258,13 @@ def finn_streamlining(model_finn, model_finn_streamlined_path):
     #         RoundAndClipThresholds(),
     #         CollapseRepeatedMul(),
     #     ]
+    path = f"./models/{qmodel_name}/{submodel_name}_debug/"
+    # create path if not exist
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+    # clean the path
+    for f in os.listdir(path):
+        os.remove(os.path.join(path, f))
     streamline_transformations = [
             # 1D CONV
             Change3DTo4DTensors(),
@@ -268,8 +276,15 @@ def finn_streamlining(model_finn, model_finn_streamlined_path):
             MoveAddPastConv(),
             AbsorbAddIntoMultiThreshold(),
             BatchNormToAffine(),
-            CollapseRepeatedMul(),
+            CollapseRepeatedMul(), # 8
             MoveAddPastConv(),
+            AbsorbAddIntoMultiThreshold(),
+            # MoveScalarMulPastConv(),
+            MoveMulPastDWConv(),
+            AbsorbMulIntoMultiThreshold(),
+            AbsorbAddIntoMultiThreshold(),
+            AbsorbMulIntoMultiThreshold(),
+            AbsorbAddIntoMultiThreshold(),
             # GENERAL
             # absorb.AbsorbSignBiasIntoMultiThreshold(),
             # MoveScalarLinearPastInvariants(),

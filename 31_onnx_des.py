@@ -25,7 +25,7 @@ lstm_hidden_size=128 # was 128
 lstm_num_layers=1
 mlp_hidden_size=512 # was 256 broader is much better
 mlp_num_layers=1 # was 3
-dropout=0.2
+dropout=0.1
 num_heads=4
 # lstm input size after the cnn layer
 qlstm_input_size = input_size * 2
