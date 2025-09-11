@@ -260,21 +260,31 @@ def finn_streamlining(model_finn, model_finn_streamlined_path):
     streamline_transformations = [
             # 1D CONV
             Change3DTo4DTensors(),
+            # NEW
+            AbsorbAddIntoMultiThreshold(),
+            AbsorbMulIntoMultiThreshold(),
+            MoveScalarMulPastConv(),
+            AbsorbMulIntoMultiThreshold(),
+            MoveAddPastConv(),
+            AbsorbAddIntoMultiThreshold(),
+            BatchNormToAffine(),
+            CollapseRepeatedMul(),
+            MoveAddPastConv(),
             # GENERAL
-            absorb.AbsorbSignBiasIntoMultiThreshold(),
-            MoveScalarLinearPastInvariants(),
-            Streamline(),
+            # absorb.AbsorbSignBiasIntoMultiThreshold(),
+            # MoveScalarLinearPastInvariants(),
+            # Streamline(),
             # CONV
-            LowerConvsToMatMul(),
-            MakeMaxPoolNHWC(),
-            absorb.AbsorbTransposeIntoMultiThreshold(),
-            MakeMaxPoolNHWC(),
-            absorb.AbsorbConsecutiveTransposes(),
-            absorb.AbsorbTransposeIntoMultiThreshold(),
+            # LowerConvsToMatMul(),
+            # MakeMaxPoolNHWC(),
+            # absorb.AbsorbTransposeIntoMultiThreshold(),
+            # MakeMaxPoolNHWC(),
+            # absorb.AbsorbConsecutiveTransposes(),
+            # absorb.AbsorbTransposeIntoMultiThreshold(),
             # GENERAL
-            Streamline(),
-            InferDataLayouts(),
-            RemoveUnusedTensors(),
+            # Streamline(),
+            # InferDataLayouts(),
+            # RemoveUnusedTensors(),
     ]
     i = 0
     for trn in streamline_transformations:
