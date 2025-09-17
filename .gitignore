@@ -12,6 +12,7 @@
 !*.yaml
 !requirements.txt
 !final_model.pt
+!*.onnx
 # 例外：明确忽略某些特定 .log 文件
 **/vivado.log
 **/build_dataflow.log
