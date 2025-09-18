@@ -136,6 +136,98 @@ class AbsorbAddIntoMultiThreshold(Transformation):
                         graph_modified = True
         return (model, graph_modified)
 
+class AbsorbMulIntoMultiThreshold_shashwat(Transformation):
+    """Absorb preceding Mul ops into MultiThreshold by updating the threshold
+    values. Only *positive* scalar/1D mul vectors can be absorbed."""
+
+    def apply(self, model):
+        graph = model.graph
+        node_ind = 0
+        graph_modified = False
+        for n in graph.node:
+            node_ind += 1
+            if n.op_type == "Mul" and not model.is_fork_node(n) and not model.is_join_node(n):
+                mul_weight_name = n.input[1]
+                print(mul_weight_name)
+                # print(n.output[0])
+                # This if condition is added so that the Mul node which gives the cell state as its output,
+                # Does not get merged in the Multithreshold node, otherwise the output is hanging. 
+                # TODO_lstm : Will have to generalize this further.........
+                # if(n.output[0]=='global_out_1' or n.output[0]=='global_out_2'):
+                    # continue
+                A = model.get_initializer(mul_weight_name)
+                print(A)
+                # Shashwat Change : This 'if' statement helps in passing the 'Mul' node which has the global input cell_state
+                # as it's input. So that all the remaining Mul operators can be absorbed into the Multithreshold node.
+                # if (mul_weight_name == "Mul_10_param0" or mul_weight_name == "Mul_5_param0" or mul_weight_name == "Mul_6_param0" or mul_weight_name == "Mul_0_param0" or mul_weight_name == "Mul_4_param0" or mul_weight_name == "Mul_7_param0" or mul_weight_name == "Mul_9_param0" or mul_weight_name == "Mul_8_param0" or mul_weight_name == "Mul_11_param0" or mul_weight_name == "Mul_12_param0" or mul_weight_name == "Mul_15_param0" or mul_weight_name == "Mul_16_param0" or mul_weight_name == "Mul_19_param0" or mul_weight_name == "Mul_18_param0" or mul_weight_name == "Mul_24_param0" or mul_weight_name == "Mul_28_param0" or mul_weight_name == "Mul_31_param0"):         
+                #     mul_weight_name = mul_weight_name
+                if A == None:
+                    continue
+                # assert A is not None, "Initializer for mul weights is not set."
+                # print("Mul Weight Name = ",mul_weight_name)
+                is_signed = (A < 0).any()
+                is_scalar = A.ndim == 0 or all(x == 1 for x in A.shape)
+                actual_ndims = len(tuple(filter(lambda x: x > 1, A.shape)))
+                is_1d = actual_ndims == 1
+                consumer = model.find_consumer(n.output[0])
+                if consumer is not None and consumer.op_type == "MultiThreshold":
+                    if not is_signed and (is_1d or is_scalar):
+                        threshold_name = consumer.input[1]
+                        T = model.get_initializer(threshold_name)
+                        assert T is not None, "Initializer for thresholds is not set."
+                        start_name = n.input[0]
+                        # compute new thresholds and set initializer
+                        Tnew = T / A.reshape(-1, 1)
+                        # TODO: need to handle negative A values correctly; produce
+                        # mul sign mask and merge into preceding matmul?
+                        model.set_initializer(threshold_name, Tnew)
+                        # wire add input directly to MultiThreshold
+                        consumer.input[0] = start_name
+                        # remove the mul node
+                        graph.node.remove(n)
+                        graph_modified = True
+
+            elif n.op_type == "Mul" and model.is_fork_node(n): #qlstm_change, only allowing fork nodes to pass through to the below  transformation
+                mul_weight_name = n.input[1]
+                break_flag = 0
+                print(mul_weight_name)
+                if(n.output[0]=='global_out_1' or n.output[0]=='global_out_2'):
+                    continue
+                A = model.get_initializer(mul_weight_name)
+                print(A)
+                if A == None:
+                    continue
+                is_signed = (A < 0).any()
+                is_scalar = A.ndim == 0 or all(x == 1 for x in A.shape)
+                actual_ndims = len(tuple(filter(lambda x: x > 1, A.shape)))
+                is_1d = actual_ndims == 1
+                consumer = model.find_consumer(n.output[0])
+                for i in range(len(consumer)): #Loop for making sure all consumers are MultiThreshold's
+                    if(consumer[i].op_type != "MultiThreshold"):
+                        break_flag = 1
+                        continue
+                if(break_flag == 1):
+                    continue
+                for i in range(len(consumer)): #for loop for absorbing scalar mul in each consumer MultiThreshold in the fork
+                    if consumer[i] is not None and consumer[i].op_type == "MultiThreshold":
+                        if not is_signed and (is_1d or is_scalar):
+                            threshold_name = consumer[i].input[1]
+                            T = model.get_initializer(threshold_name)
+                            assert T is not None, "Initializer for thresholds is not set."
+                            start_name = n.input[0]
+                            # compute new thresholds and set initializer
+                            Tnew = T / A.reshape(-1, 1)
+                            # TODO: need to handle negative A values correctly; produce
+                            # mul sign mask and merge into preceding matmul?
+                            model.set_initializer(threshold_name, Tnew)
+                            # wire add input directly to MultiThreshold
+                            consumer[i].input[0] = start_name
+                            # remove the mul node
+                graph.node.remove(n)#Removing the mul node after it has been absorbed by all the consumer MT nodes in the for loop
+                graph_modified = True
+
+        return (model, graph_modified)
+
 
 class AbsorbMulIntoMultiThreshold(Transformation):
     """Absorb preceding Mul ops into MultiThreshold by updating the threshold
