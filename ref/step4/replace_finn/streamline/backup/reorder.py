@@ -111,6 +111,9 @@ class MoveScalarMulPastMatMul(Transformation):
         for n in graph.node:
             node_ind += 1
             if n.op_type == "Mul" and not model.is_fork_node(n) and not model.is_join_node(n):
+                # print(n.input[1])
+                if(n.output[0]=='global_out_1' or n.output[0]=='global_out_2'):
+                    continue
                 consumer = model.find_consumer(n.output[0])
                 if (
                     consumer is not None
@@ -118,12 +121,17 @@ class MoveScalarMulPastMatMul(Transformation):
                     and not model.is_join_node(consumer)
                 ):
                     mul_weight_name = n.input[1]
-                    matmul_weight_name = consumer.input[1]
+                    matmul_weight_name = consumer.input[0]
+                    print(mul_weight_name)
+                    print(matmul_weight_name)
                     A = model.get_initializer(mul_weight_name)
                     W = model.get_initializer(matmul_weight_name)
                     if (A is None) or (W is None):
                         warnings.warn("MatMul or Mul params are not constant, skipping")
+                        print(f"Mul weight name: {mul_weight_name}")
+                        print(f"MatMul weight name: {matmul_weight_name}")
                         continue
+                    # print("Here1")
                     start_name = n.input[0]
                     middle_name = n.output[0]
                     end_name = consumer.output[0]
@@ -133,7 +141,7 @@ class MoveScalarMulPastMatMul(Transformation):
                         # make and insert new nodes
                         new_matmul = oh.make_node(
                             "MatMul",
-                            [start_name, matmul_weight_name],
+                            [matmul_weight_name,start_name], #Shashwat Change
                             [middle_name],
                             name=consumer.name,
                         )
@@ -143,6 +151,7 @@ class MoveScalarMulPastMatMul(Transformation):
                             [end_name],
                             name=n.name,
                         )
+                        #print("Here2")
                         graph.node.insert(node_ind, new_matmul)
                         graph.node.insert(node_ind + 1, new_mul)
                         model.set_tensor_shape(middle_name, mm_out_shape)
@@ -150,7 +159,68 @@ class MoveScalarMulPastMatMul(Transformation):
                         graph.node.remove(n)
                         graph.node.remove(consumer)
                         graph_modified = True
-        model = model.transform(InferShapes())
+                        print("-----------------------------------------")
+                        
+            elif n.op_type == "Mul" and model.is_fork_node(n): #qlstm_change, only allowing fork nodes to pass through to the below  transformation
+                #Shashwat change
+                # print(n.input[1])
+                break_flag = 0
+                # if (n.input[1] == "Mul_5_param0"):
+                #     continue
+                consumer = model.find_consumer(n.output[0])
+                print("test: MoveScalarMulPastMatMul debugging")
+                print(f"consumer: {consumer}")
+                print(f"n.output[0]: {n.output[0]}")
+                for i in range(len(consumer)): #Loop for making sure all consumers are MatMul's
+                    if(consumer[i].op_type != "MatMul"):
+                        break_flag = 1
+                        continue #This continue only continues the for loop not the big while loop
+                if(break_flag == 1): #Hence this continue was introdcued so the transformation does not mess up with the Mul node present later in the graph.
+                    continue
+                for i in range(len(consumer)): #for loop for moving scalar mul past each consumer in the fork
+                    if ( consumer[i] is not None and consumer[i].op_type == "MatMul" and not model.is_join_node(consumer[i])):
+                        mul_weight_name = n.input[1]
+                        matmul_weight_name = consumer[i].input[1] #qlstm_change [1] -> [0] : Matmul params are at index [0] due to shape constraints
+                        A = model.get_initializer(mul_weight_name)
+                        W = model.get_initializer(matmul_weight_name)
+                        print(f"A: {A}")
+                        print(f"W: {W}")
+                        print("here2!!!!!!!!!!!!!!!!!!!!")
+                        if (A is None) or (W is None):
+                            warnings.warn("MatMul or Mul params are not constant, skipping")
+                            print(f"Mul weight name: {mul_weight_name}")
+                            print(f"MatMul weight name: {matmul_weight_name}")
+                            continue
+                        start_name = n.input[0]
+                        middle_name = n.output[0]+str(i) #Update the middle name as it was common in all the four outputs. 
+                        #So all four matmul's having an output to a single scalar mul node. Instead of one having output to all the mul's
+                        end_name = consumer[i].output[0]
+                        mm_out_shape = model.get_tensor_shape(end_name)
+                        print("here!!!!!!!!!!!!!!!!!!!!")
+                        if all(x == 1 for x in A.shape):
+                            # if the mul is scalar, we can simply swap the order of ops
+                            # make and insert new nodes
+                            new_matmul = oh.make_node(
+                                "MatMul",
+                                [matmul_weight_name,start_name], #Getting incompatible shapes that is why reversing the order of inputs in the node specification
+                                [middle_name],
+                                name=consumer[i].name,
+                            )
+                            new_mul = oh.make_node(
+                                "Mul",
+                                [middle_name, mul_weight_name],
+                                [end_name],
+                                name=n.name,
+                            )
+                            graph.node.insert(node_ind, new_matmul)
+                            graph.node.insert(node_ind + 1, new_mul)
+                            print(f"node{node_ind}, inserted MatMul node name: {new_matmul.name}")
+                            model.set_tensor_shape(middle_name, mm_out_shape)
+                            # remove old nodes
+                            graph.node.remove(consumer[i])
+                graph.node.remove(n) #Removing the mul node after it has been moves past all consumers in the for loop
+                graph_modified = True
+        # model = model.transform(InferShapes())
         return (model, graph_modified)
 
 
