@@ -61,9 +61,9 @@ def behavior_test():
     # init the input
     batch_size = 1
     seq_len = 10
-    x = np.random.randn(qlstm_input_size, batch_size).astype(np.float32)
-    h0 = np.zeros((hidden_size, batch_size), dtype=np.float32)
-    c0 = np.zeros((hidden_size, batch_size), dtype=np.float32)
+    x = np.random.randn(batch_size, qlstm_input_size).astype(np.float32)
+    h0 = np.zeros((batch_size, hidden_size), dtype=np.float32)
+    c0 = np.zeros((batch_size, hidden_size), dtype=np.float32)
     # Get the input name for the ONNX model
     output = sess_qcdq.run(None, {"X": x, "h_t-1": h0, "c_t-1": c0})
     output = output[0].transpose(1,0)
@@ -74,7 +74,7 @@ def behavior_test():
     with torch.no_grad():
         print(x.shape)
         # pack x from (64, 1) to (1, 1, 64)
-        x_torch = torch.from_numpy(x).permute(1,0).unsqueeze(0)
+        x_torch = torch.from_numpy(x).unsqueeze(0)
         print(x_torch.shape)
         with torch.no_grad():
             out_torch = qmodel.forward(x_torch).numpy()
@@ -87,6 +87,7 @@ def behavior_test():
 
     print('------------------------------')
     print('qmodel output:')
+    out_torch = out_torch.transpose(1,0)
     print(out_torch.shape)
     print(out_torch)
     print('------------------------------')

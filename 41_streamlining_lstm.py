@@ -22,7 +22,8 @@ from finn.transformation.streamline.absorb import (
     AbsorbMulIntoMultiThreshold,
     AbsorbSignBiasIntoMultiThreshold,
     FactorOutMulSignMagnitude_shashwat,
-    AbsorbTransposeIntoMultiThreshold
+    AbsorbTransposeIntoMultiThreshold,
+    AbsorbAddIntoMultiThreshold_cli, # modified to avoid bug
 )
 from finn.transformation.streamline.collapse_repeated import (
     CollapseRepeatedAdd,
@@ -116,9 +117,12 @@ h0 = np.zeros((hidden_size, batch_size), dtype=np.float32)
 c0 = np.zeros((hidden_size, batch_size), dtype=np.float32)
 
 input_dict = {}
-input_dict["X"] = x
-input_dict["h_t-1"] = h0
-input_dict["c_t-1"] = c0
+input_dict["X"] = x.transpose()
+input_dict["h_t-1"] = h0.transpose()
+input_dict["c_t-1"] = c0.transpose()
+input_dict["global_in_2"] = x.transpose()
+input_dict["global_in"] = h0.transpose()
+input_dict["global_in_1"] = c0.transpose()
 
 def convert_qcdq_to_qonnx(model_qcdq_path, model_qonnx_path):
     print("step 1: qcdq to qonnx_tmp1")
@@ -163,7 +167,7 @@ def finn_behavior_test(model_finn):
 
 def finn_streamline_model_behavior_test(streamlined_model):
     output_dict_streamlined = oxe.execute_onnx(streamlined_model, input_dict,return_full_exec_context=True)
-    streamlined_output = np.array(output_dict_streamlined.get("dql_hidden_out")) 
+    streamlined_output = np.array(output_dict_streamlined.get("global_out")) 
     streamlined_output = streamlined_output.transpose(1,0)
     print("Streamlined output shape:", streamlined_output.shape)
     return streamlined_output
@@ -180,34 +184,37 @@ def finn_tidyup(model_finn, model_finn_tidy_up_path):
 
 def finn_streamlining(model_finn, model_finn_streamlined_path):
     streamline_transformations = [
-            ConvertSubToAdd(),
-            ConvertDivToMul(),     
-            BatchNormToAffine(), 
-            ConvertSignToThres(),  
-            MoveMulPastMaxPool(),
-            MoveScalarLinearPastInvariants(),  
-            AbsorbSignBiasIntoMultiThreshold(),
-            MoveAddPastMul(),     
-            MoveScalarAddPastMatMul(), 
-            MoveAddPastConv(),       
-            MoveScalarMulPastConv(), 
-            MoveAddPastMul(), 
-            CollapseRepeatedAdd(),
-            CollapseRepeatedMul(),   
-            MoveMulPastMaxPool(),  
-            AbsorbAddIntoMultiThreshold(), 
-            FactorOutMulSignMagnitude_shashwat(), # from shashwat
-            AbsorbMulIntoMultiThreshold(), #This transformation absorbs the Scalar Mul nodes into the next Multithreshold nodes.
-            MoveLinearPastEltwiseAdd(), #This transformation helps us get all the scalar mul nodes past the elstwiseadd. 
-            MoveLinearPastEltwiseMul(),#This transformation helps us get scalar mul's past eltwisemuls. We can then absorb them into the multithrehsold opertion and remove them from the graph entirely.
-            AbsorbMulIntoMultiThreshold(), #The scalar mul nodes passed in the previous step are now merged into the multithreshold node.
-            RoundAndClipThresholds(),
-            MoveScalarMulPastMatMul(), #To move activation scales im the dense part beyond dense layers.
-            AbsorbMulIntoMultiThreshold(),
-            MoveLinearPastEltwiseAdd(),
-            AbsorbMulIntoMultiThreshold(), #For the last Multithreshold node in the graph
-            RoundAndClipThresholds(),
-            CollapseRepeatedMul(),
+            ConvertSubToAdd(),#0
+            ConvertDivToMul(),#1
+            BatchNormToAffine(),#2
+            ConvertSignToThres(),#3
+            MoveMulPastMaxPool(),#4
+            MoveScalarLinearPastInvariants(),#5
+            AbsorbSignBiasIntoMultiThreshold(),#6
+            MoveAddPastMul(),#7
+            MoveScalarAddPastMatMul(),#8
+            MoveAddPastConv(),#9
+            MoveScalarMulPastConv(),#10
+            MoveAddPastMul(),#11
+            CollapseRepeatedAdd(),#12
+            CollapseRepeatedMul(),#13
+            MoveMulPastMaxPool(),#14
+            AbsorbAddIntoMultiThreshold(),#15
+            AbsorbAddIntoMultiThreshold_cli(),#16 modified to avoid bug
+            FactorOutMulSignMagnitude_shashwat(), #17 from shashwat
+            AbsorbMulIntoMultiThreshold(), #18 This transformation absorbs the Scalar Mul nodes into the next Multithreshold nodes.
+            MoveLinearPastEltwiseAdd(), #19 This transformation helps us get all the scalar mul nodes past the elstwiseadd. 
+            MoveLinearPastEltwiseMul(),#20 This transformation helps us get scalar mul's past eltwisemuls. We can then absorb them into the multithrehsold opertion and remove them from the graph entirely.
+            AbsorbMulIntoMultiThreshold(), #21 The scalar mul nodes passed in the previous step are now merged into the multithreshold node.
+            RoundAndClipThresholds(), # 21
+            MoveScalarMulPastMatMul(), # 22 *****problem result To move activation scales im the dense part beyond dense layers.
+            # this code depends on dimension order which needs to be fixed:                         matmul_weight_name = consumer[i].input[1] # *** attention qlstm_change [1] -> [0] : Matmul params are at index [0] due to shape constraints
+            # also,the node created here now, the input dimensions are not correct even the node already created, need to switch
+            AbsorbMulIntoMultiThreshold(),#24
+            MoveLinearPastEltwiseAdd(),#25
+            AbsorbMulIntoMultiThreshold(), #26For the last Multithreshold node in the graph
+            RoundAndClipThresholds(),#27
+            CollapseRepeatedMul(),#28
         ]
     i = 0
     for trn in streamline_transformations:
@@ -227,6 +234,9 @@ def finn_streamlining(model_finn, model_finn_streamlined_path):
 if __name__ == "__main__":
     # brevitas model
     brevitas_behaviour = brevitas_behavior_test(sublstm_def, qmodel_pth_path)
+    brevitas_behaviour = brevitas_behaviour.transpose(1,0)
+    print("Brevitas outputshape:")
+    print(brevitas_behaviour.shape)
     # qcdq -> qonnx
     model_qonnx = convert_qcdq_to_qonnx(model_qcdq_path, model_qonnx_path)
     # behavior test: qcdq vs qonnx
@@ -244,9 +254,12 @@ if __name__ == "__main__":
     print(finn_onnx_behaviour)
     tidy_finn = finn_tidyup(model_finn, model_finn_tidy_up_path)
     finn_streamlining = finn_streamlining(tidy_finn, model_finn_streamlined_path)
-    # streamlined_behaviour = finn_streamline_model_behavior_test(finn_streamlining)
-    # mse_finn_streamlined = np.mean((finn_onnx_behaviour - streamlined_behaviour) ** 2)
-    # print(f'MSE(FINN model and streamlined FINN model): {mse_finn_streamlined}')
+    streamlined_behaviour = finn_streamline_model_behavior_test(finn_streamlining)
+    print(f"finn_onnx behaviour shape: {finn_onnx_behaviour.shape}")
+    print(f"finn streamlined behaviour shape: {streamlined_behaviour.shape}")
+    
+    mse_finn_streamlined = np.mean((finn_onnx_behaviour - streamlined_behaviour) ** 2)
+    print(f'MSE(FINN model and streamlined FINN model): {mse_finn_streamlined}')
 
 
     # # --------------------------------------------------------
