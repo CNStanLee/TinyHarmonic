@@ -23,7 +23,7 @@ from finn.transformation.streamline.absorb import (
     AbsorbSignBiasIntoMultiThreshold,
     FactorOutMulSignMagnitude_shashwat,
     AbsorbTransposeIntoMultiThreshold,
-    AbsorbAddIntoMultiThreshold_cli, # modified to avoid bug
+   # AbsorbAddIntoMultiThreshold_cli, # modified to avoid bug
 )
 from finn.transformation.streamline.collapse_repeated import (
     CollapseRepeatedAdd,
@@ -200,7 +200,7 @@ def finn_streamlining(model_finn, model_finn_streamlined_path):
             CollapseRepeatedMul(),#13
             MoveMulPastMaxPool(),#14
             AbsorbAddIntoMultiThreshold(),#15
-            AbsorbAddIntoMultiThreshold_cli(),#16 modified to avoid bug
+            #AbsorbAddIntoMultiThreshold_cli(),#16 modified to avoid bug
             FactorOutMulSignMagnitude_shashwat(), #17 from shashwat
             AbsorbMulIntoMultiThreshold(), #18 This transformation absorbs the Scalar Mul nodes into the next Multithreshold nodes.
             MoveLinearPastEltwiseAdd(), #19 This transformation helps us get all the scalar mul nodes past the elstwiseadd. 
@@ -240,24 +240,27 @@ if __name__ == "__main__":
     # qcdq -> qonnx
     model_qonnx = convert_qcdq_to_qonnx(model_qcdq_path, model_qonnx_path)
     # behavior test: qcdq vs qonnx
-    qonnx_behaviour = qonnx_behavior_test(model_qonnx)
-    mse_brevitas_qonnx = np.mean((brevitas_behaviour - qonnx_behaviour) ** 2)
-    print(f'MSE(Brevitas model and QONNX model): {mse_brevitas_qonnx}')
+
+
     # qonnx -> finn
     model_finn = convert_qonnx_to_finn(model_qonnx, model_finn_path)
     finn_onnx_behaviour = finn_behavior_test(model_finn)
-    mse_qonnx_finn = np.mean((qonnx_behaviour - finn_onnx_behaviour) ** 2)
-    print(f'MSE(QONNX model and FINN model): {mse_qonnx_finn}')
-    print("qonnx behaviour:")
-    print(qonnx_behaviour)
-    print("finn behaviour:")
-    print(finn_onnx_behaviour)
+
+    # print("qonnx behaviour:")
+    # print(qonnx_behaviour)
+    # print("finn behaviour:")
+    # print(finn_onnx_behaviour)
     tidy_finn = finn_tidyup(model_finn, model_finn_tidy_up_path)
     finn_streamlining = finn_streamlining(tidy_finn, model_finn_streamlined_path)
     streamlined_behaviour = finn_streamline_model_behavior_test(finn_streamlining)
     print(f"finn_onnx behaviour shape: {finn_onnx_behaviour.shape}")
     print(f"finn streamlined behaviour shape: {streamlined_behaviour.shape}")
     
+    qonnx_behaviour = qonnx_behavior_test(model_qonnx)
+    mse_brevitas_qonnx = np.mean((brevitas_behaviour - qonnx_behaviour) ** 2)
+    print(f'MSE(Brevitas model and QONNX model): {mse_brevitas_qonnx}')
+    mse_qonnx_finn = np.mean((qonnx_behaviour - finn_onnx_behaviour) ** 2)
+    print(f'MSE(QONNX model and FINN model): {mse_qonnx_finn}')
     mse_finn_streamlined = np.mean((finn_onnx_behaviour - streamlined_behaviour) ** 2)
     print(f'MSE(FINN model and streamlined FINN model): {mse_finn_streamlined}')
 

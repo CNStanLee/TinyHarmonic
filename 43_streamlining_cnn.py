@@ -327,16 +327,21 @@ if __name__ == "__main__":
     
     # behavior test: brevitas vs qonnx
     qonnx_behaviour = qonnx_behavior_test(model_qonnx)
-    mse_brevitas_qonnx = np.mean((brevitas_behaviour - qonnx_behaviour) ** 2)
-    print(f'MSE(Brevitas model and QONNX model): {mse_brevitas_qonnx}')
+
     # qonnx -> finn
     model_finn = convert_qonnx_to_finn(model_qonnx, model_finn_path)
     finn_onnx_behaviour = finn_behavior_test(model_finn)
-    mse_qonnx_finn = np.mean((qonnx_behaviour - finn_onnx_behaviour) ** 2)
-    print(f'MSE(QONNX model and FINN model): {mse_qonnx_finn}')
+
     tidy_finn = finn_tidyup(model_finn, model_finn_tidy_up_path)
     finn_streamlining = finn_streamlining(tidy_finn, model_finn_streamlined_path)
     streamlined_behaviour = streamline_model_behavior_test(finn_streamlining)
+    
+    mse_brevitas_qonnx = np.mean((brevitas_behaviour - qonnx_behaviour) ** 2)
+    print(f'MSE(Brevitas model and QONNX model): {mse_brevitas_qonnx}')
+
+    mse_qonnx_finn = np.mean((qonnx_behaviour - finn_onnx_behaviour) ** 2)
+    print(f'MSE(QONNX model and FINN model): {mse_qonnx_finn}')
+    
     mse_finn_streamlined = np.mean((finn_onnx_behaviour - np.squeeze(streamlined_behaviour, axis=-1)) ** 2)
     print(f'MSE(FINN model and streamlined FINN model): {mse_finn_streamlined}')
 

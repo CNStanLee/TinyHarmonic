@@ -100,6 +100,189 @@ class MoveAddPastMul(Transformation):
         return (model, graph_modified)
 
 
+# class MoveScalarMulPastMatMul(Transformation):
+#     """Move scalar mul operations past matmul operations. We want to have muls
+#     next to each other such that they can be collapsed into a single mul."""
+
+#     def apply(self, model):
+#         graph = model.graph
+#         node_ind = 0
+#         graph_modified = False
+#         for n in graph.node:
+#             node_ind += 1
+#             if n.op_type == "Mul" and not model.is_fork_node(n) and not model.is_join_node(n):
+#                 # print(n.input[1])
+#                 if(n.output[0]=='global_out_1' or n.output[0]=='global_out_2'):
+#                     continue
+#                 consumer = model.find_consumer(n.output[0])
+#                 if (
+#                     consumer is not None
+#                     and consumer.op_type == "MatMul"
+#                     and not model.is_join_node(consumer)
+#                 ):
+#                     mul_weight_name = n.input[1]
+#                     matmul_weight_name = consumer.input[0]
+#                     print(mul_weight_name)
+#                     print(matmul_weight_name)
+#                     A = model.get_initializer(mul_weight_name)
+#                     W = model.get_initializer(matmul_weight_name)
+#                     if (A is None) or (W is None):
+#                         warnings.warn("MatMul or Mul params are not constant, skipping")
+#                         continue
+#                     # print("Here1")
+#                     start_name = n.input[0]
+#                     middle_name = n.output[0]
+#                     end_name = consumer.output[0]
+#                     mm_out_shape = model.get_tensor_shape(end_name)
+#                     if all(x == 1 for x in A.shape):
+#                         # if the mul is scalar, we can simply swap the order of ops
+#                         # make and insert new nodes
+#                         new_matmul = oh.make_node(
+#                             "MatMul",
+#                             [matmul_weight_name,start_name], #Shashwat Change
+#                             [middle_name],
+#                             name=consumer.name,
+#                         )
+#                         new_mul = oh.make_node(
+#                             "Mul",
+#                             [middle_name, mul_weight_name],
+#                             [end_name],
+#                             name=n.name,
+#                         )
+#                         #print("Here2")
+#                         graph.node.insert(node_ind, new_matmul)
+#                         graph.node.insert(node_ind + 1, new_mul)
+#                         model.set_tensor_shape(middle_name, mm_out_shape)
+#                         # remove old nodes
+#                         graph.node.remove(n)
+#                         graph.node.remove(consumer)
+#                         graph_modified = True
+#                         print("-----------------------------------------")
+                        
+#             elif n.op_type == "Mul" and model.is_fork_node(n): #qlstm_change, only allowing fork nodes to pass through to the below  transformation
+#                 #Shashwat change
+#                 # print(n.input[1])
+#                 break_flag = 0
+#                 if (n.input[1] == "Mul_4_param0"):
+#                     continue
+#                 consumer = model.find_consumer(n.output[0])
+#                 print("fucking debugging")
+#                 print(consumer)
+#                 print(n.output[0])
+#                 for i in range(len(consumer)): #Loop for making sure all consumers are MatMul's
+#                     if(consumer[i].op_type != "MatMul"):
+#                         break_flag = 1
+#                         continue #This continue only continues the for loop not the big while loop
+#                 if(break_flag == 1): #Hence this continue was introdcued so the transformation does not mess up with the Mul node present later in the graph.
+#                     continue
+#                 for i in range(len(consumer)): #for loop for moving scalar mul past each consumer in the fork
+#                     if ( consumer[i] is not None and consumer[i].op_type == "MatMul" and not model.is_join_node(consumer[i])):
+#                         mul_weight_name = n.input[1]
+#                         matmul_weight_name = consumer[i].input[0] #qlstm_change [1] -> [0] : Matmul params are at index [0] due to shape constraints
+#                         A = model.get_initializer(mul_weight_name)
+#                         W = model.get_initializer(matmul_weight_name)
+#                         if (A is None) or (W is None):
+#                             warnings.warn("MatMul or Mul params are not constant, skipping")
+#                             continue
+#                         start_name = n.input[0]
+#                         middle_name = n.output[0]+str(i) #Update the middle name as it was common in all the four outputs. 
+#                         #So all four matmul's having an output to a single scalar mul node. Instead of one having output to all the mul's
+#                         end_name = consumer[i].output[0]
+#                         mm_out_shape = model.get_tensor_shape(end_name)
+#                         if all(x == 1 for x in A.shape):
+#                             # if the mul is scalar, we can simply swap the order of ops
+#                             # make and insert new nodes
+#                             new_matmul = oh.make_node(
+#                                 "MatMul",
+#                                 [matmul_weight_name,start_name], #Getting incompatible shapes that is why reversing the order of inputs in the node specification
+#                                 [middle_name],
+#                                 name=consumer[i].name,
+#                             )
+#                             new_mul = oh.make_node(
+#                                 "Mul",
+#                                 [middle_name, mul_weight_name],
+#                                 [end_name],
+#                                 name=n.name,
+#                             )
+#                             graph.node.insert(node_ind, new_matmul)
+#                             graph.node.insert(node_ind + 1, new_mul)
+#                             model.set_tensor_shape(middle_name, mm_out_shape)
+#                             # remove old nodes
+#                             graph.node.remove(consumer[i])
+#                 graph.node.remove(n) #Removing the mul node after it has been moves past all consumers in the for loop
+#                 graph_modified = True
+#         # model = model.transform(InferShapes())
+#         return (model, graph_modified)
+
+class MoveScalarMulPastGather_changhong(Transformation):
+    """Move scalar mul operations past gather operations. We want to have muls
+    next to each other such that they can be collapsed into a single mul."""
+
+    def apply(self, model):
+        graph = model.graph
+        node_ind = 0
+        graph_modified = False
+        
+        for n in graph.node:
+            node_ind += 1
+            # Look for Mul nodes that are not fork or join nodes
+            if n.op_type == "Mul" and not model.is_fork_node(n) and not model.is_join_node(n):
+                consumer = model.find_consumer(n.output[0])
+                
+                # Check if the consumer is a Gather node and not a join node
+                if (
+                    consumer is not None
+                    and consumer.op_type == "Gather"
+                    and not model.is_join_node(consumer)
+                ):
+                    mul_weight_name = n.input[1]
+                    A = model.get_initializer(mul_weight_name)
+                    
+                    # Check if Mul weight is constant
+                    if A is None:
+                        warnings.warn("Mul param is not constant, skipping")
+                        continue
+                    
+                    gather_node = consumer
+                    mul_node = n
+                    
+                    # Get tensor names and shapes
+                    start_name = mul_node.input[0]
+                    gather_in_name = gather_node.input[0]
+                    gather_in_shape = model.get_tensor_shape(gather_in_name)
+                    gather_out_name = gather_node.output[0]
+                    gather_out_shape = model.get_tensor_shape(gather_out_name)
+                    
+                    # Check if the mul is scalar (all dimensions == 1)
+                    if all(x == 1 for x in A.shape):
+                        # If the mul is scalar, we can swap the order of operations
+                        
+                        # Rewire gather input to be mul input
+                        gather_node.input[0] = start_name
+                        model.set_tensor_shape(start_name, gather_in_shape)
+                        
+                        # Use old gather input tensor as gather output
+                        gather_node.output[0] = gather_in_name
+                        model.set_tensor_shape(gather_in_name, gather_out_shape)
+                        
+                        # Use new gather output as new mul node input
+                        mul_node.input[0] = gather_in_name
+                        
+                        # Use old gather output as new mul node output
+                        mul_node.output[0] = gather_out_name
+                        
+                        # Move mul node past gather node
+                        graph.node.remove(mul_node)
+                        graph.node.insert(node_ind, mul_node)
+                        
+                        graph_modified = True
+                        print(f"Moved scalar Mul past Gather: {mul_node.name} -> {gather_node.name}")
+        
+        if graph_modified:
+            model = model.transform(InferShapes())
+            
+        return (model, graph_modified)
+
 class MoveScalarMulPastMatMul(Transformation):
     """Move scalar mul operations past matmul operations. We want to have muls
     next to each other such that they can be collapsed into a single mul."""
@@ -178,7 +361,7 @@ class MoveScalarMulPastMatMul(Transformation):
                 for i in range(len(consumer)): #for loop for moving scalar mul past each consumer in the fork
                     if ( consumer[i] is not None and consumer[i].op_type == "MatMul" and not model.is_join_node(consumer[i])):
                         mul_weight_name = n.input[1]
-                        matmul_weight_name = consumer[i].input[0] #qlstm_change [1] -> [0] : Matmul params are at index [0] due to shape constraints
+                        matmul_weight_name = consumer[i].input[1] #qlstm_change [1] -> [0] : Matmul params are at index [0] due to shape constraints
                         A = model.get_initializer(mul_weight_name)
                         W = model.get_initializer(matmul_weight_name)
                         if (A is None) or (W is None):
@@ -194,7 +377,8 @@ class MoveScalarMulPastMatMul(Transformation):
                             # make and insert new nodes
                             new_matmul = oh.make_node(
                                 "MatMul",
-                                [matmul_weight_name,start_name], #Getting incompatible shapes that is why reversing the order of inputs in the node specification
+                                # [matmul_weight_name,start_name], #Getting incompatible shapes that is why reversing the order of inputs in the node specification
+                                [start_name, matmul_weight_name],
                                 [middle_name],
                                 name=consumer[i].name,
                             )
