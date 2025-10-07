@@ -41,6 +41,74 @@ from qonnx.transformation.infer_datatypes import InferDataTypes
 from qonnx.transformation.infer_shapes import InferShapes
 from qonnx.util.basic import get_by_name
 
+class MoveScalarMulPastGather_changhong(Transformation):
+    """Move scalar mul operations past gather operations. We want to have muls
+    next to each other such that they can be collapsed into a single mul."""
+
+    def apply(self, model):
+        graph = model.graph
+        node_ind = 0
+        graph_modified = False
+        
+        for n in graph.node:
+            node_ind += 1
+            # Look for Mul nodes that are not fork or join nodes
+            if n.op_type == "Mul" and not model.is_fork_node(n) and not model.is_join_node(n):
+                consumer = model.find_consumer(n.output[0])
+                
+                # Check if the consumer is a Gather node and not a join node
+                if (
+                    consumer is not None
+                    and consumer.op_type == "Gather"
+                    and not model.is_join_node(consumer)
+                ):
+                    mul_weight_name = n.input[1]
+                    A = model.get_initializer(mul_weight_name)
+                    
+                    # Check if Mul weight is constant
+                    if A is None:
+                        warnings.warn("Mul param is not constant, skipping")
+                        continue
+                    
+                    gather_node = consumer
+                    mul_node = n
+                    
+                    # Get tensor names and shapes
+                    start_name = mul_node.input[0]
+                    gather_in_name = gather_node.input[0]
+                    gather_in_shape = model.get_tensor_shape(gather_in_name)
+                    gather_out_name = gather_node.output[0]
+                    gather_out_shape = model.get_tensor_shape(gather_out_name)
+                    
+                    # Check if the mul is scalar (all dimensions == 1)
+                    if all(x == 1 for x in A.shape):
+                        # If the mul is scalar, we can swap the order of operations
+                        
+                        # Rewire gather input to be mul input
+                        gather_node.input[0] = start_name
+                        model.set_tensor_shape(start_name, gather_in_shape)
+                        
+                        # Use old gather input tensor as gather output
+                        gather_node.output[0] = gather_in_name
+                        model.set_tensor_shape(gather_in_name, gather_out_shape)
+                        
+                        # Use new gather output as new mul node input
+                        mul_node.input[0] = gather_in_name
+                        
+                        # Use old gather output as new mul node output
+                        mul_node.output[0] = gather_out_name
+                        
+                        # Move mul node past gather node
+                        graph.node.remove(mul_node)
+                        graph.node.insert(node_ind, mul_node)
+                        
+                        graph_modified = True
+                        print(f"Moved scalar Mul past Gather: {mul_node.name} -> {gather_node.name}")
+        
+        if graph_modified:
+            model = model.transform(InferShapes())
+            
+        return (model, graph_modified)
 
 class MoveAddPastMul(Transformation):
     """Move add operations past multiply operations on linear segments of the graph.
